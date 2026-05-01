@@ -1,0 +1,5 @@
+﻿decision_id,draft_id,event_id,created_at,operator_id,decision,note
+d4a92fe1-fe01-4148-9ca7-3968bb6a2bde,ea7e805d-2a15-4841-a665-a218b48be185,11045e00-73c1-4cfd-94f3-bc2bdf6c8e0d,2026-05-01T02:13:50+00:00,stage20_local_operator,needs_review,Verified during Stage 19~20 local integration smoke test.
+3df5e2e6-620c-43a6-baee-b6391a9ec180,6869cbc9-22f4-4342-b8ab-4c7ec8c0d861,307b5eb8-950a-4f93-8689-6153181bd899,2026-05-01T08:05:36+00:00,stage20_local_operator,needs_review,Verified during Stage 19~20 local integration smoke test.
+bd1d3fc4-aa63-46db-8481-0bcb016c3291,399e27b4-3d32-44e0-b5fc-5acc7c574f95,0e6c2c9f-2b3c-49a8-bbf9-28efab9617b9,2026-05-01T08:35:44+00:00,stage20_local_operator,needs_review,Verified during Stage 19~20 local integration smoke test.
+fbdbf4cf-7ab0-4163-832b-d034b72d55bb,fe7b486b-1916-4842-837a-4b9130a36cce,33b04ebc-8b6e-480f-8666-cdc69a900209,2026-05-01T08:42:21+00:00,stage20_local_operator,needs_review,Verified during Stage 19~20 local integration smoke test.

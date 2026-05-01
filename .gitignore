@@ -1,0 +1,31 @@
+.env
+.env.*
+*.key
+*secret*
+*secrets*
+
+# Local tool/runtime state
+.codex/
+.venv/
+.vscode/
+.idea/
+
+# Python and notebook caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Local operation/runtime artifacts that are regenerated during demos
+outputs/operations.db
+outputs/realtime_stream/
+outputs/work_order_drafts/
+outputs/custom_company_model/*.joblib

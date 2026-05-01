@@ -1,0 +1,47 @@
+{
+  "target_column": "quality_result",
+  "id_time_columns": [
+    "asset_id",
+    "event_time"
+  ],
+  "original_feature_columns": [
+    "product_family",
+    "air_temp_celsius",
+    "process_temp_celsius",
+    "spindle_speed",
+    "load_torque",
+    "tool_age_min"
+  ],
+  "numeric_columns": [
+    "air_temp_celsius",
+    "process_temp_celsius",
+    "spindle_speed",
+    "load_torque",
+    "tool_age_min"
+  ],
+  "categorical_columns": [
+    "product_family"
+  ],
+  "encoded_feature_columns": [
+    "air_temp_celsius",
+    "process_temp_celsius",
+    "spindle_speed",
+    "load_torque",
+    "tool_age_min",
+    "product_family_h",
+    "product_family_l",
+    "product_family_m"
+  ],
+  "unit_conversions": {
+    "air_temp_celsius": {
+      "preset": "Celsius -> Kelvin",
+      "multiplier": 1.0,
+      "offset": 273.15
+    },
+    "process_temp_celsius": {
+      "preset": "Celsius -> Kelvin",
+      "multiplier": 1.0,
+      "offset": 273.15
+    }
+  }
+}

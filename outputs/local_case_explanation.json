@@ -1,0 +1,49 @@
+{
+  "index": 6497,
+  "actual": 1,
+  "prediction": 1,
+  "probability": 0.9936161041259766,
+  "raw_case": {
+    "UDI": 6498,
+    "Product ID": "L53677",
+    "Type": "L",
+    "Air temperature [K]": 300.8,
+    "Process temperature [K]": 309.9,
+    "Rotational speed [rpm]": 1312,
+    "Torque [Nm]": 65.3,
+    "Tool wear [min]": 192,
+    "Machine failure": 1
+  },
+  "top_features": [
+    {
+      "feature": "torque_nm",
+      "feature_value": 65.3,
+      "shap_value": 3.935215711593628,
+      "abs_shap_value": 3.935215711593628
+    },
+    {
+      "feature": "rotational_speed_rpm",
+      "feature_value": 1312.0,
+      "shap_value": 0.8857147693634033,
+      "abs_shap_value": 0.8857147693634033
+    },
+    {
+      "feature": "air_temperature_k",
+      "feature_value": 300.8,
+      "shap_value": -0.6725330352783203,
+      "abs_shap_value": 0.6725330352783203
+    },
+    {
+      "feature": "tool_wear_min",
+      "feature_value": 192.0,
+      "shap_value": 0.3528647720813751,
+      "abs_shap_value": 0.3528647720813751
+    },
+    {
+      "feature": "process_temperature_k",
+      "feature_value": 309.9,
+      "shap_value": 0.2659805119037628,
+      "abs_shap_value": 0.2659805119037628
+    }
+  ]
+}
