@@ -1,0 +1,4 @@
+﻿strategy_id,display_name,description,precision,recall,f1_score,alert_count,false_positive,false_negative,true_positive,true_negative,actual_failure_count,total_rows
+spc_only_torque_control_limit,SPC-only torque control limit,Single-sensor SPC-style torque control-limit rule.,0.8571,0.0882,0.16,7,1,62,6,1931,68,2000
+ml_selected_threshold,ML selected threshold,XGBoost probability crossing the F1-selected threshold.,0.8197,0.7353,0.7752,61,11,18,50,1921,68,2000
+ml_spc_combined,ML + Predictive SPC combined,Risk probability threshold or risk control-limit alert.,0.625,0.8088,0.7051,88,33,13,55,1899,68,2000

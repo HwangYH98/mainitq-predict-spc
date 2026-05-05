@@ -1,0 +1,32 @@
+{
+  "scope": "local mock bridge only; not a real PLC/SCADA connection",
+  "protocol": "mqtt_mock",
+  "event_count": 2,
+  "draft_count": 2,
+  "decision_count": 2,
+  "events": [
+    {
+      "event_id": "a69cd576-7e43-40ca-ad1f-e4bafa33ccea",
+      "source": "field_event:mqtt_mock:mock-press-01",
+      "probability": 0.966716,
+      "risk_status": "High Risk",
+      "equipment_id": "mock-press-01"
+    },
+    {
+      "event_id": "8e526c9d-2873-4745-9813-320af558211d",
+      "source": "field_event:mqtt_mock:mock-press-02",
+      "probability": 0.929375,
+      "risk_status": "High Risk",
+      "equipment_id": "mock-press-02"
+    }
+  ],
+  "draft_ids": [
+    "c254b3b9-ad58-4956-824a-896895f0fcd2",
+    "acb3fa7b-4154-41ca-9355-578e36a91cf6"
+  ],
+  "decision_ids": [
+    "10a81e59-5b72-4074-b612-1cb5e6cc0c90",
+    "bb037c02-5cbd-4d61-a68e-e2ff9dfe7841"
+  ],
+  "decisions_csv": "C:\\Users\\hoon9\\Documents\\capstone design\\outputs\\work_order_decisions.csv"
+}

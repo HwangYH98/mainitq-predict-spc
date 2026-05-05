@@ -26,8 +26,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Starting AI Predictive SPC user dashboard on http://127.0.0.1:8501 ...
-"%PYTHON%" -m streamlit run app\dashboard.py --server.headless true --browser.gatherUsageStats false
+echo Starting Streamlit admin dashboard on http://127.0.0.1:8502 ...
+"%PYTHON%" -m streamlit run app\admin_dashboard.py --server.port 8502 --server.headless true --browser.gatherUsageStats false
 if errorlevel 1 goto error
 
 exit /b 0

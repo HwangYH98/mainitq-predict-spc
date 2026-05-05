@@ -24,13 +24,16 @@
 6. Future 10-step deviation prediction
 7. Predictive SPC chart generation
 8. Required Gemini/OpenAI GenAI manager report for the full Stage 1~20 run
-9. Streamlit dashboard
+9. SMOTE / threshold / SPC-only vs ML+SPC comparison artifacts
+10. MQTT/OPC UA style local mock bridge
+11. Streamlit dashboard
 
 ## 5. Experiment Results
 
 - XGBoost PR-AUC `0.8014`.
 - selected threshold `0.87`, tuned F1-score `0.7752`.
 - SPC High Risk row `61`, SPC alert row `88`.
+- Comparison artifacts summarize SMOTE and SPC-only vs ML+SPC trade-offs without claiming real cost reduction.
 - future 10-step deviation F1-score `0.4142`.
 
 ## 6. Dashboard Demonstration

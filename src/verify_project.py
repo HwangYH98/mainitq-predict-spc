@@ -89,6 +89,33 @@ REQUIRED_STAGE15_18_OUTPUTS = [
     "work_order_decisions.csv",
 ]
 
+REQUIRED_COMPARISON_OUTPUTS = [
+    "model_strategy_comparison.csv",
+    "model_strategy_comparison.json",
+    "model_strategy_pr_curve.png",
+    "model_strategy_summary.md",
+    "spc_vs_ml_comparison.csv",
+    "spc_vs_ml_comparison.json",
+    "spc_vs_ml_summary.md",
+    "mock_field_bridge_summary.json",
+    "mock_field_bridge_summary.md",
+]
+
+EXPECTED_MODEL_STRATEGIES = {
+    "logistic_regression_default",
+    "logistic_regression_smote",
+    "xgboost_default",
+    "xgboost_default_tuned_threshold",
+    "xgboost_smote",
+    "xgboost_smote_tuned_threshold",
+}
+
+EXPECTED_ALERT_STRATEGIES = {
+    "spc_only_torque_control_limit",
+    "ml_selected_threshold",
+    "ml_spc_combined",
+}
+
 REQUIRED_PREDICTION_COLUMNS = [
     "UDI",
     "Product ID",
@@ -144,6 +171,9 @@ def verify_project_imports() -> None:
         "realtime_ops",
         "api_server",
         "watch_realtime_folder",
+        "compare_model_strategies",
+        "compare_spc_ml_alerts",
+        "mock_field_bridge",
         "verify_company_generalization",
         "verify_stage15_20",
         "verify_stage19_20_integration",
@@ -505,6 +535,86 @@ def verify_stage15_18_outputs() -> None:
     )
 
 
+def verify_comparison_outputs() -> None:
+    for filename in REQUIRED_COMPARISON_OUTPUTS:
+        require_file(OUTPUT_DIR / filename)
+
+    model_comparison = pd.read_csv(OUTPUT_DIR / "model_strategy_comparison.csv")
+    required_model_columns = [
+        "strategy_id",
+        "display_name",
+        "uses_smote",
+        "threshold_strategy",
+        "threshold",
+        "precision",
+        "recall",
+        "f1_score",
+        "roc_auc",
+        "pr_auc",
+        "alert_count",
+        "false_positive",
+        "false_negative",
+    ]
+    missing_model_columns = [
+        column for column in required_model_columns if column not in model_comparison.columns
+    ]
+    if missing_model_columns:
+        fail(f"model_strategy_comparison.csv is missing columns: {missing_model_columns}")
+
+    actual_model_strategies = set(model_comparison["strategy_id"].astype(str))
+    missing_model_strategies = EXPECTED_MODEL_STRATEGIES - actual_model_strategies
+    if missing_model_strategies:
+        fail(f"model_strategy_comparison.csv is missing strategies: {sorted(missing_model_strategies)}")
+
+    if model_comparison["pr_auc"].isna().any() or model_comparison["f1_score"].isna().any():
+        fail("model_strategy_comparison.csv contains missing PR-AUC or F1 values.")
+
+    model_summary = (OUTPUT_DIR / "model_strategy_summary.md").read_text(encoding="utf-8")
+    if "does not prove real factory cost reduction" not in model_summary:
+        fail("model_strategy_summary.md is missing the cost-reduction guardrail.")
+
+    spc_comparison = pd.read_csv(OUTPUT_DIR / "spc_vs_ml_comparison.csv")
+    required_alert_columns = [
+        "strategy_id",
+        "display_name",
+        "precision",
+        "recall",
+        "f1_score",
+        "alert_count",
+        "false_positive",
+        "false_negative",
+        "actual_failure_count",
+        "total_rows",
+    ]
+    missing_alert_columns = [
+        column for column in required_alert_columns if column not in spc_comparison.columns
+    ]
+    if missing_alert_columns:
+        fail(f"spc_vs_ml_comparison.csv is missing columns: {missing_alert_columns}")
+
+    actual_alert_strategies = set(spc_comparison["strategy_id"].astype(str))
+    missing_alert_strategies = EXPECTED_ALERT_STRATEGIES - actual_alert_strategies
+    if missing_alert_strategies:
+        fail(f"spc_vs_ml_comparison.csv is missing strategies: {sorted(missing_alert_strategies)}")
+
+    spc_summary = (OUTPUT_DIR / "spc_vs_ml_summary.md").read_text(encoding="utf-8")
+    if "does not prove real maintenance cost reduction" not in spc_summary:
+        fail("spc_vs_ml_summary.md is missing the maintenance-cost guardrail.")
+
+    mock_summary = json.loads((OUTPUT_DIR / "mock_field_bridge_summary.json").read_text(encoding="utf-8"))
+    if "local mock bridge only" not in str(mock_summary.get("scope", "")):
+        fail("mock_field_bridge_summary.json is missing the local-mock scope.")
+    if mock_summary.get("protocol") not in {"mqtt_mock", "opcua_mock"}:
+        fail("mock_field_bridge_summary.json has an unsupported protocol.")
+    if int(mock_summary.get("event_count", 0)) <= 0:
+        fail("mock_field_bridge_summary.json should contain at least one event.")
+
+    pass_step(
+        "Comparison and mock-bridge outputs passed "
+        f"({len(model_comparison)} model rows, {len(spc_comparison)} alert rows)."
+    )
+
+
 def verify_stage19_20_design_outputs() -> None:
     from verify_stage19_20_design import verify_stage19_20_design
 
@@ -524,6 +634,9 @@ def verify_utf8_documents() -> None:
         OUTPUT_DIR / "final_presentation_plan.md",
         OUTPUT_DIR / "stage15_20_architecture.md",
         OUTPUT_DIR / "stage19_20_operations_design.md",
+        OUTPUT_DIR / "model_strategy_summary.md",
+        OUTPUT_DIR / "spc_vs_ml_summary.md",
+        OUTPUT_DIR / "mock_field_bridge_summary.md",
     ]
 
     for path in documents:
@@ -548,6 +661,7 @@ def main() -> None:
     verify_future_deviation_outputs(metrics)
     verify_stage14_company_outputs()
     verify_stage15_18_outputs()
+    verify_comparison_outputs()
     verify_stage19_20_design_outputs()
     verify_utf8_documents()
     print("All project verification checks passed.")

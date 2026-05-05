@@ -1,0 +1,50 @@
+{
+  "rows": [
+    {
+      "strategy_id": "spc_only_torque_control_limit",
+      "display_name": "SPC-only torque control limit",
+      "description": "Single-sensor SPC-style torque control-limit rule.",
+      "precision": 0.8571,
+      "recall": 0.0882,
+      "f1_score": 0.16,
+      "alert_count": 7,
+      "false_positive": 1,
+      "false_negative": 62,
+      "true_positive": 6,
+      "true_negative": 1931,
+      "actual_failure_count": 68,
+      "total_rows": 2000
+    },
+    {
+      "strategy_id": "ml_selected_threshold",
+      "display_name": "ML selected threshold",
+      "description": "XGBoost probability crossing the F1-selected threshold.",
+      "precision": 0.8197,
+      "recall": 0.7353,
+      "f1_score": 0.7752,
+      "alert_count": 61,
+      "false_positive": 11,
+      "false_negative": 18,
+      "true_positive": 50,
+      "true_negative": 1921,
+      "actual_failure_count": 68,
+      "total_rows": 2000
+    },
+    {
+      "strategy_id": "ml_spc_combined",
+      "display_name": "ML + Predictive SPC combined",
+      "description": "Risk probability threshold or risk control-limit alert.",
+      "precision": 0.625,
+      "recall": 0.8088,
+      "f1_score": 0.7051,
+      "alert_count": 88,
+      "false_positive": 33,
+      "false_negative": 13,
+      "true_positive": 55,
+      "true_negative": 1899,
+      "actual_failure_count": 68,
+      "total_rows": 2000
+    }
+  ],
+  "presentation_safe_conclusion": "F1-score 기준 최고 alert 전략은 `ML selected threshold` (0.7752)입니다. 단일 torque SPC rule은 7개 alert만 발생시켜 recall이 0.0882였고, ML+SPC combined는 88개 alert와 recall 0.8088를 보였습니다. 이 결과는 실제 비용 절감 실증이 아니라, rule-based SPC-only와 ML probability 기반 alert의 탐지 특성 차이를 보여주는 로컬 비교입니다."
+}

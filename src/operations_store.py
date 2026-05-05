@@ -24,7 +24,7 @@ def connect(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
 
 
 def initialize_db(db_path: str | Path = DEFAULT_DB_PATH) -> None:
-    """Create SQLite tables for prediction events, drafts, and decisions."""
+    """Create SQLite tables for prediction events, drafts, decisions, and audits."""
     with connect(db_path) as connection:
         connection.execute(
             """
@@ -68,6 +68,23 @@ def initialize_db(db_path: str | Path = DEFAULT_DB_PATH) -> None:
                 draft_json TEXT NOT NULL,
                 markdown TEXT NOT NULL,
                 draft_path TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                audit_id TEXT UNIQUE NOT NULL,
+                created_at TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                action TEXT NOT NULL,
+                status TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                detail_json TEXT NOT NULL,
+                error_message TEXT NOT NULL
             )
             """
         )
@@ -281,3 +298,63 @@ def list_work_order_decisions(
             (int(limit),),
         ).fetchall()
     return [row_to_decision(row) for row in rows]
+
+
+def insert_audit_log(entry: dict, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+    """Append one audit log row for product MVP traceability."""
+    initialize_db(db_path)
+    with connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO audit_logs (
+                audit_id, created_at, actor_id, role, action, status,
+                target_type, target_id, detail_json, error_message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entry["audit_id"],
+                entry["created_at"],
+                entry.get("actor_id", ""),
+                entry.get("role", ""),
+                entry["action"],
+                entry["status"],
+                entry.get("target_type", ""),
+                entry.get("target_id", ""),
+                json_dumps(entry.get("detail", {})),
+                entry.get("error_message", ""),
+            ),
+        )
+
+
+def row_to_audit_log(row: sqlite3.Row) -> dict:
+    """Convert an audit row into a dashboard/API friendly dictionary."""
+    return {
+        "audit_id": row["audit_id"],
+        "created_at": row["created_at"],
+        "actor_id": row["actor_id"],
+        "role": row["role"],
+        "action": row["action"],
+        "status": row["status"],
+        "target_type": row["target_type"],
+        "target_id": row["target_id"],
+        "detail": json.loads(row["detail_json"]),
+        "error_message": row["error_message"],
+    }
+
+
+def list_audit_logs(
+    limit: int = 100,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> list[dict]:
+    """Return recent audit logs for the admin console."""
+    initialize_db(db_path)
+    with connect(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT * FROM audit_logs
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+    return [row_to_audit_log(row) for row in rows]

@@ -59,6 +59,9 @@
 - `outputs/spc_risk_chart.png`, `outputs/spc_control_chart.png`: Predictive SPC 시간축 시뮬레이션 그림
 - `outputs/future_deviation_predictions.csv`, `outputs/future_deviation_metrics.json`, `outputs/future_deviation_chart.png`: 미래 10-step 이탈 예측 산출물
 - `outputs/ai_manager_report.md`: Gemini/OpenAI API 기반 관리자 참고 리포트
+- `outputs/model_strategy_comparison.csv`, `outputs/model_strategy_summary.md`: Logistic/XGBoost, SMOTE, threshold tuning 비교
+- `outputs/spc_vs_ml_comparison.csv`, `outputs/spc_vs_ml_summary.md`: SPC-only rule 대비 ML+SPC alert 비교
+- `outputs/mock_field_bridge_summary.md`: MQTT/OPC UA style local mock bridge 실행 요약
 - `outputs/stage19_20_operations_design.md`: 실제 현장 연동과 운영 시스템화를 위한 설계 및 검증 조건
 - `outputs/final_paper_outline.md`, `outputs/final_presentation_plan.md`: 6월 최종 논문/발표 구성안
 - `outputs/midterm_presentation_guide.md`: PPT 없는 중간발표 진행안

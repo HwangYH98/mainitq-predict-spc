@@ -29,3 +29,4 @@ outputs/operations.db
 outputs/realtime_stream/
 outputs/work_order_drafts/
 outputs/custom_company_model/*.joblib
+local_presentation_notes/

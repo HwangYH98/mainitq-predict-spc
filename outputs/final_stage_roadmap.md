@@ -25,6 +25,8 @@
 - Stage 15~18-lite: file-drop streaming, FastAPI 예측, SQLite event history, 관리자 승인용 작업지시 초안 생성
 - Stage 19-lite: `POST /field-event`로 equipment_id, timestamp, source_system, sensor row를 받아 로컬 예측 이벤트로 저장
 - Stage 20-lite: `POST /work-order-decision`으로 approve/reject/needs_review 결정을 SQLite와 CSV에 기록
+- 비교 실험: Logistic/XGBoost, SMOTE, threshold tuning, SPC-only vs ML+SPC alert 전략을 같은 test split에서 비교
+- mock bridge: 실제 PLC/SCADA가 아닌 MQTT/OPC UA style local bridge로 field-event payload 계약 검증
 - 다운로드: 모델 지표, 예측 결과 CSV, Stage 9/10 문서, Stage 14 회사 재학습 산출물, 운영 PoC 산출물 제공
 - 운영 요약: 모델 성능, threshold 기준, High Risk row 수, field-event 수, 작업지시 결정 기록, 현재 한계를 한 화면에 정리
 
@@ -42,4 +44,4 @@ LLM을 연결한다면 역할은 `자동 정비 명령`이 아니라 `관리자 
 
 ## 6. 논문에 쓰기 좋은 핵심 문장
 
-> 본 연구는 AI4I 2020 공개 데이터를 기반으로 제조 설비 고장 예측 모델을 구축하고, threshold 조정, SHAP 기반 설명, Gemini/OpenAI GenAI 관리자 리포트, 회사 CSV 재학습, file-drop streaming, FastAPI, SQLite event history, field-event API, 관리자 승인용 작업지시 초안과 operator decision logging을 Stage 1~20 로컬 통합 PoC로 연결한다. 실제 PLC/SCADA/클라우드 운영에는 현장 endpoint, 보안 승인, 현장 데이터 재검증이 추가로 필요하다.
+> 본 연구는 AI4I 2020 공개 데이터를 기반으로 제조 설비 고장 예측 모델을 구축하고, threshold 조정, SHAP 기반 설명, Predictive SPC, Gemini/OpenAI GenAI 관리자 리포트, SMOTE/threshold/SPC-only 비교 실험, 회사 CSV 재학습, local mock bridge, FastAPI, SQLite event history, field-event API, 관리자 승인용 작업지시 초안과 operator decision logging을 Stage 1~20 로컬 통합 PoC로 연결한다. 실제 PLC/SCADA/클라우드 운영에는 현장 endpoint, 보안 승인, 현장 데이터 재검증이 추가로 필요하다.

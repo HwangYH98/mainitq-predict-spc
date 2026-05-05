@@ -1,5 +1,10 @@
 import json
+import hmac
+import os
+import re
 import sys
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -25,11 +30,18 @@ from company_adapter import (
 )
 from data import ID_COLUMNS, preprocess_features, prepare_train_test_data
 from operations_store import (
+    insert_audit_log,
+    list_audit_logs,
     list_prediction_events,
     list_work_order_decisions,
     list_work_order_drafts,
 )
 from predictive_spc import genai_ai_report
+from realtime_ops import (
+    create_work_order_decision,
+    create_work_order_draft,
+    predict_field_event,
+)
 from train_baseline import RANDOM_STATE, TEST_SIZE, build_models
 
 REQUIRED_FILES = {
@@ -63,6 +75,15 @@ REQUIRED_FILES = {
     "predictions": OUTPUT_DIR / "baseline_predictions.csv",
 }
 
+OPTIONAL_FILES = {
+    "model_strategy_summary": OUTPUT_DIR / "model_strategy_summary.md",
+    "model_strategy_comparison": OUTPUT_DIR / "model_strategy_comparison.csv",
+    "model_strategy_pr_curve": OUTPUT_DIR / "model_strategy_pr_curve.png",
+    "spc_vs_ml_summary": OUTPUT_DIR / "spc_vs_ml_summary.md",
+    "spc_vs_ml_comparison": OUTPUT_DIR / "spc_vs_ml_comparison.csv",
+    "mock_bridge_summary": OUTPUT_DIR / "mock_field_bridge_summary.md",
+}
+
 RAW_UPLOAD_COLUMNS = [
     "Type",
     "Air temperature [K]",
@@ -70,6 +91,68 @@ RAW_UPLOAD_COLUMNS = [
     "Rotational speed [rpm]",
     "Torque [Nm]",
     "Tool wear [min]",
+]
+
+SAMPLE_FIELD_ROWS = [
+    {
+        "Type": "L",
+        "Air temperature [K]": 298.1,
+        "Process temperature [K]": 308.6,
+        "Rotational speed [rpm]": 1551,
+        "Torque [Nm]": 42.8,
+        "Tool wear [min]": 0,
+    },
+    {
+        "Type": "M",
+        "Air temperature [K]": 298.2,
+        "Process temperature [K]": 308.7,
+        "Rotational speed [rpm]": 1408,
+        "Torque [Nm]": 46.3,
+        "Tool wear [min]": 3,
+    },
+    {
+        "Type": "H",
+        "Air temperature [K]": 299.4,
+        "Process temperature [K]": 309.2,
+        "Rotational speed [rpm]": 1320,
+        "Torque [Nm]": 58.2,
+        "Tool wear [min]": 120,
+    },
+]
+
+STAGE19_SENSOR_PRESETS = {
+    "Normal 샘플": {
+        "Type": "L",
+        "Air temperature [K]": 298.1,
+        "Process temperature [K]": 308.6,
+        "Rotational speed [rpm]": 1551,
+        "Torque [Nm]": 42.8,
+        "Tool wear [min]": 0,
+    },
+    "High Risk 샘플": {
+        "Type": "L",
+        "Air temperature [K]": 302.5,
+        "Process temperature [K]": 312.2,
+        "Rotational speed [rpm]": 1280,
+        "Torque [Nm]": 68.0,
+        "Tool wear [min]": 240,
+    },
+}
+
+GENAI_DEFAULT_MODELS = {
+    "gemini": "gemini-2.5-flash",
+    "openai": "gpt-5-mini",
+}
+
+GENAI_ENV_KEYS = [
+    "AI_REPORT_PROVIDER",
+    "GEMINI_API_KEY",
+    "GEMINI_MODEL",
+    "GEMINI_MODEL_CANDIDATES",
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL",
+    "REQUIRE_GENAI_REPORT",
+    "REQUIRE_OPENAI_REPORT",
 ]
 
 FEATURE_LABELS = {
@@ -95,10 +178,10 @@ FEATURE_GUIDANCE = {
 }
 
 
-def configure_page() -> None:
-    """Set page metadata and presentation-friendly styling."""
+def configure_page(page_title: str = "AI 예지보전 SPC 대시보드") -> None:
+    """Set page metadata and product-style dashboard styling."""
     st.set_page_config(
-        page_title="Predictive SPC Stage 1~20 Local PoC",
+        page_title=page_title,
         page_icon="chart_with_upwards_trend",
         layout="wide",
     )
@@ -136,7 +219,7 @@ def configure_page() -> None:
             color: var(--ink);
             font-size: 2.25rem;
             margin-bottom: 0.35rem;
-            letter-spacing: -0.04em;
+            letter-spacing: 0;
         }
         .hero p {
             color: var(--muted);
@@ -168,7 +251,7 @@ def configure_page() -> None:
             color: var(--ink);
             font-size: 2rem;
             font-weight: 800;
-            letter-spacing: -0.03em;
+            letter-spacing: 0;
         }
         .metric-card .note {
             color: var(--signal);
@@ -239,6 +322,14 @@ def load_markdown(path: Path) -> str:
 
 
 @st.cache_data
+def load_optional_markdown(path: Path) -> str:
+    """Load an optional Markdown artifact when it exists."""
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+@st.cache_data
 def load_predictions(path: Path) -> pd.DataFrame:
     """Load saved test-set predictions for the row simulation tab."""
     return pd.read_csv(path)
@@ -248,6 +339,259 @@ def load_predictions(path: Path) -> pd.DataFrame:
 def load_csv(path: Path) -> pd.DataFrame:
     """Load a saved CSV artifact."""
     return pd.read_csv(path)
+
+
+def sample_field_dataframe() -> pd.DataFrame:
+    """Return a small AI4I-compatible CSV example for dashboard users."""
+    return pd.DataFrame(SAMPLE_FIELD_ROWS)
+
+
+def validate_sensor_upload(uploaded_df: pd.DataFrame) -> pd.DataFrame:
+    """Return a cleaned sensor upload or raise a user-friendly ValueError."""
+    missing_columns = [column for column in RAW_UPLOAD_COLUMNS if column not in uploaded_df.columns]
+    if missing_columns:
+        raise ValueError(
+            "필수 컬럼이 없습니다: "
+            + ", ".join(missing_columns)
+            + ". 샘플 CSV의 컬럼명을 그대로 맞춰 주세요."
+        )
+
+    cleaned = uploaded_df.copy()
+    cleaned["Type"] = cleaned["Type"].astype(str).str.strip().str.upper()
+    invalid_types = sorted(set(cleaned.loc[~cleaned["Type"].isin(["L", "M", "H"]), "Type"]))
+    if invalid_types:
+        raise ValueError("Type 컬럼은 L, M, H 중 하나여야 합니다. 발견된 값: " + ", ".join(invalid_types))
+
+    numeric_columns = [column for column in RAW_UPLOAD_COLUMNS if column != "Type"]
+    for column in numeric_columns:
+        converted = pd.to_numeric(cleaned[column], errors="coerce")
+        if converted.isna().any():
+            bad_rows = (converted[converted.isna()].index + 1).astype(str).tolist()[:5]
+            raise ValueError(
+                f"{column} 컬럼은 숫자여야 합니다. 숫자로 바꿀 수 없는 row: "
+                + ", ".join(bad_rows)
+            )
+        cleaned[column] = converted
+
+    return cleaned
+
+
+def csv_download_bytes(df: pd.DataFrame) -> bytes:
+    """Return UTF-8-SIG bytes so Excel opens Korean/CSV files cleanly."""
+    return df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+
+
+def get_secret_value(*names: str) -> str:
+    """Read a password-like value from env vars or Streamlit secrets."""
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+
+    try:
+        secrets = st.secrets
+    except Exception:
+        return ""
+
+    for name in names:
+        try:
+            value = secrets.get(name)
+        except Exception:
+            value = None
+        if value:
+            return str(value)
+
+        if "." in name:
+            current = secrets
+            try:
+                for part in name.split("."):
+                    current = current[part]
+            except Exception:
+                current = None
+            if current:
+                return str(current)
+
+    return ""
+
+
+def configured_password_for_role(role: str) -> str:
+    """Return the configured password for one dashboard role."""
+    if role == "admin":
+        return get_secret_value("APP_ADMIN_PASSWORD", "auth.admin_password")
+    return get_secret_value("APP_OPERATOR_PASSWORD", "auth.operator_password")
+
+
+def current_actor() -> dict:
+    """Return the authenticated session actor, or a safe anonymous fallback."""
+    return st.session_state.get(
+        "auth_user",
+        {"actor_id": "anonymous", "role": "anonymous"},
+    )
+
+
+def record_audit(
+    action: str,
+    status: str,
+    target_type: str = "",
+    target_id: str = "",
+    detail: dict | None = None,
+    error_message: str = "",
+    actor: dict | None = None,
+) -> None:
+    """Append an audit log without breaking the user flow if logging fails."""
+    actor = actor or current_actor()
+    entry = {
+        "audit_id": str(uuid.uuid4()),
+        "created_at": datetime.now().astimezone().replace(microsecond=0).isoformat(),
+        "actor_id": actor.get("actor_id", "anonymous"),
+        "role": actor.get("role", "anonymous"),
+        "action": action,
+        "status": status,
+        "target_type": target_type,
+        "target_id": target_id,
+        "detail": detail or {},
+        "error_message": error_message,
+    }
+    try:
+        insert_audit_log(entry, db_path=OPERATIONS_DB_PATH)
+    except Exception as error:
+        st.sidebar.warning(f"Audit log write failed: {error}")
+
+
+def require_login(role: str) -> dict:
+    """Require an operator/admin password without storing credentials in code."""
+    session_key = f"{role}_authenticated"
+    existing_user = st.session_state.get("auth_user")
+    if st.session_state.get(session_key) and existing_user and existing_user.get("role") == role:
+        return existing_user
+
+    password = configured_password_for_role(role)
+    role_label = "Admin" if role == "admin" else "Operator"
+    if not password:
+        st.error(f"{role_label} password is not configured.")
+        st.markdown(
+            "환경변수 또는 Streamlit secrets에 비밀번호를 설정한 뒤 다시 실행하세요. "
+            "비밀번호는 코드나 Git에 저장하지 않습니다."
+        )
+        if role == "admin":
+            st.code('$env:APP_ADMIN_PASSWORD="your-admin-password"', language="powershell")
+        else:
+            st.code('$env:APP_OPERATOR_PASSWORD="your-operator-password"', language="powershell")
+        st.stop()
+
+    st.subheader(f"{role_label} 로그인")
+    st.caption("비밀번호는 현재 세션 검증에만 사용하며 파일에 저장하지 않습니다.")
+    with st.form(f"{role}_login_form"):
+        actor_id = st.text_input(
+            "사용자 ID",
+            value="admin" if role == "admin" else "operator_01",
+            key=f"{role}_login_actor_id",
+        )
+        supplied = st.text_input(
+            "Password",
+            type="password",
+            key=f"{role}_login_password",
+        )
+        submitted = st.form_submit_button("로그인", type="primary")
+
+    if submitted:
+        actor = {"actor_id": actor_id.strip() or role, "role": role}
+        if hmac.compare_digest(supplied, password):
+            st.session_state[session_key] = True
+            st.session_state["auth_user"] = actor
+            record_audit("auth.login", "success", "session", role, actor=actor)
+            st.success("로그인되었습니다.")
+            return actor
+        record_audit(
+            "auth.login",
+            "failure",
+            "session",
+            role,
+            error_message="invalid password",
+            actor=actor,
+        )
+        st.error("비밀번호가 맞지 않습니다.")
+
+    st.stop()
+
+
+def render_genai_sidebar_settings() -> dict:
+    """Collect optional GenAI settings in the sidebar without persisting secrets."""
+    st.sidebar.markdown("### GenAI API 설정")
+    provider_label = st.sidebar.radio(
+        "Provider",
+        options=["Gemini", "OpenAI"],
+        index=0,
+        horizontal=True,
+        help="관리자 참고 리포트를 새로 생성할 때 사용할 API입니다.",
+        key="genai_provider_label",
+    )
+    provider = provider_label.lower()
+    model_key = f"genai_{provider}_model"
+    st.session_state.setdefault(model_key, GENAI_DEFAULT_MODELS[provider])
+    model = st.sidebar.text_input(
+        "Model",
+        key=model_key,
+        help="기본값을 그대로 사용해도 됩니다.",
+    ).strip()
+    api_key = st.sidebar.text_input(
+        f"{provider_label} API key",
+        type="password",
+        key=f"genai_{provider}_api_key",
+        help="파일에 저장하지 않고 현재 Streamlit 세션에서만 사용합니다.",
+    ).strip()
+
+    st.sidebar.caption("API key는 파일, .env, Git 기록에 저장하지 않습니다.")
+    if api_key:
+        st.sidebar.success(f"{provider_label} key 입력됨")
+    else:
+        st.sidebar.info("API key 없음: 저장된 리포트만 표시")
+
+    return {
+        "provider": provider,
+        "provider_label": provider_label,
+        "model": model or GENAI_DEFAULT_MODELS[provider],
+        "api_key": api_key,
+        "has_key": bool(api_key),
+    }
+
+
+def genai_status_text(settings: dict) -> str:
+    """Return a short user-facing status for the selected GenAI provider."""
+    if settings.get("has_key"):
+        return f"{settings['provider_label']} key 입력됨 / model {settings['model']}"
+    return "API key 없음: 저장된 리포트만 표시"
+
+
+def genai_report_with_sidebar_settings(context: dict, settings: dict) -> tuple[str, str]:
+    """Generate a report with sidebar key/model using temporary environment variables."""
+    if not settings.get("has_key"):
+        return genai_ai_report(context, require_genai=False)
+
+    previous_env = {key: os.environ.get(key) for key in GENAI_ENV_KEYS}
+    try:
+        provider = settings["provider"]
+        model = settings["model"]
+        os.environ["AI_REPORT_PROVIDER"] = provider
+        os.environ["REQUIRE_GENAI_REPORT"] = "1"
+        if provider == "gemini":
+            os.environ["GEMINI_API_KEY"] = settings["api_key"]
+            os.environ["GEMINI_MODEL"] = model
+            os.environ["GEMINI_MODEL_CANDIDATES"] = f"{model},gemini-2.5-flash-lite"
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ["REQUIRE_OPENAI_REPORT"] = "0"
+        else:
+            os.environ["OPENAI_API_KEY"] = settings["api_key"]
+            os.environ["OPENAI_MODEL"] = model
+            os.environ.pop("GEMINI_API_KEY", None)
+            os.environ["REQUIRE_OPENAI_REPORT"] = "1"
+        return genai_ai_report(context, require_genai=True)
+    finally:
+        for key, value in previous_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 @st.cache_resource
@@ -352,7 +696,7 @@ def prescription_draft(
         f"- Failure probability: `{probability:.4f}` / threshold `{selected_threshold:.2f}`\n"
         f"- Main evidence: {factor_text}\n"
         f"- {action}\n\n"
-        "주의: 이 문장은 실제 LLM 호출이 아니라 SHAP 근거를 사용한 Stage 8-lite 처방 초안입니다. "
+        "주의: 이 문장은 실제 LLM 호출이 아니라 SHAP 근거를 사용한 관리자 참고 권고입니다. "
         "최종 정비 지시는 현장 담당자가 확정해야 합니다."
     )
 
@@ -553,14 +897,21 @@ def metric_card(label: str, value: str, note: str) -> None:
     )
 
 
-def render_header() -> None:
-    """Render dashboard title and stage badge."""
+def render_header(
+    badge: str = "제품형 MVP",
+    title: str = "AI 예지보전 SPC 대시보드",
+    subtitle: str = (
+        "센서 CSV를 업로드하면 고장 확률, High Risk 판정, SPC 그래프, "
+        "GenAI 관리자 리포트, 승인형 작업지시 흐름을 한 화면에서 확인합니다."
+    ),
+) -> None:
+    """Render dashboard title and badge."""
     st.markdown(
-        """
+        f"""
         <div class="hero">
-            <div class="stage-badge">Stage 1~20 local integration PoC · Streamlit dashboard</div>
-            <h1>Predictive SPC Capstone Results Dashboard</h1>
-            <p>AI4I 2020 row playback, Predictive SPC, Gemini/OpenAI GenAI 관리자 리포트, field-event API, SQLite 이력, human decision logging을 한 화면에서 확인하는 로컬 통합 PoC입니다.</p>
+            <div class="stage-badge">{badge}</div>
+            <h1>{title}</h1>
+            <p>{subtitle}</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -893,17 +1244,30 @@ def render_realtime_prescription_tab(
 
 
 def render_field_csv_tab(threshold_summary: dict) -> None:
-    """Render Stage 7-lite CSV upload inference and Stage 8-lite note draft."""
-    st.subheader("Stage 7-lite 현장 데이터 입력 MVP")
+    """Render CSV upload inference and a manager-facing evidence note."""
+    st.subheader("센서 CSV 업로드 예측")
     st.caption(
-        "실제 설비 연결은 아니며, 중소기업 현장 CSV를 업로드한다고 가정한 로컬 예측 실험 기능입니다."
+        "샘플 형식에 맞춘 센서 데이터를 넣으면 row별 고장 확률과 High Risk 여부를 바로 계산합니다."
     )
 
     st.markdown(
         """
-        이 탭은 발표용 결과뷰어에서 한 단계 더 나아가, 사용자가 가진 센서 CSV를 넣었을 때
-        XGBoost 고장 확률과 `High Risk` 여부를 계산하는 PoC입니다.
+        사용자는 샘플 형식에 맞춘 센서 CSV만 업로드하면 됩니다.
+        시스템은 전처리, XGBoost 확률 예측, threshold 판정, 주요 위험 요인 요약을 순서대로 수행합니다.
         """
+    )
+
+    st.markdown("#### 입력 순서")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"순서": 1, "사용자 행동": "샘플 CSV 다운로드", "시스템 역할": "필수 컬럼과 예시값을 보여줌"},
+                {"순서": 2, "사용자 행동": "센서 CSV 업로드", "시스템 역할": "컬럼명, Type 값, 숫자 형식을 확인"},
+                {"순서": 3, "사용자 행동": "결과 확인", "시스템 역할": "고장 확률, High Risk 여부, 그래프, CSV 다운로드 제공"},
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
     )
 
     expected_columns = pd.DataFrame(
@@ -919,7 +1283,22 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
             ],
         }
     )
-    st.dataframe(expected_columns, width="stretch", hide_index=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("#### 필수 컬럼")
+        st.dataframe(expected_columns, width="stretch", hide_index=True)
+    with col2:
+        st.markdown("#### 실제 예시 3행")
+        st.dataframe(sample_field_dataframe(), width="stretch", hide_index=True)
+
+    sample_df = sample_field_dataframe()
+    st.download_button(
+        "샘플 CSV 다운로드",
+        data=csv_download_bytes(sample_df),
+        file_name="sample_field_sensor_rows.csv",
+        mime="text/csv",
+        help="업로드 형식을 확인하거나 발표 중 즉시 테스트할 때 사용할 수 있는 예시 파일입니다.",
+    )
 
     uploaded_file = st.file_uploader(
         "현장 센서 CSV 업로드",
@@ -933,6 +1312,7 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
 
     try:
         uploaded_df = pd.read_csv(uploaded_file)
+        uploaded_df = validate_sensor_upload(uploaded_df)
         selected_threshold = float(threshold_summary["selected_threshold"])
         model, feature_columns, explainer = train_stage7_inference_bundle()
         features = preprocess_features(uploaded_df, expected_columns=feature_columns)
@@ -940,12 +1320,33 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         result_df = uploaded_predictions_dataframe(uploaded_df, probabilities, selected_threshold)
         shap_values = calculate_uploaded_shap_values(explainer, features)
     except Exception as error:
+        record_audit(
+            "csv.predict",
+            "failure",
+            "upload",
+            getattr(uploaded_file, "name", "uploaded_csv"),
+            error_message=str(error),
+        )
         st.error("업로드 CSV를 예측하는 중 문제가 발생했습니다.")
-        st.exception(error)
+        st.warning(
+            "확인할 것: 필수 컬럼 누락, 컬럼명 오타, Type 값(L/M/H), 숫자 컬럼의 문자 입력 여부."
+        )
+        st.code(str(error), language="text")
         return
 
     high_risk_count = int((result_df["risk_status"] == "High Risk").sum())
     max_probability = float(result_df["xgboost_failure_probability"].max())
+    record_audit(
+        "csv.predict",
+        "success",
+        "upload",
+        getattr(uploaded_file, "name", "uploaded_csv"),
+        {
+            "row_count": int(len(result_df)),
+            "high_risk_count": high_risk_count,
+            "max_probability": round(max_probability, 6),
+        },
+    )
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -955,7 +1356,7 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     with col3:
         metric_card("Max Probability", f"{max_probability:.4f}", "최고 고장 확률")
     with col4:
-        metric_card("Threshold", f"{selected_threshold:.2f}", "Stage 4-lite 기준")
+        metric_card("Threshold", f"{selected_threshold:.2f}", "선택 기준")
 
     display_columns = [
         "input_row",
@@ -964,6 +1365,14 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         "selected_threshold",
         "risk_status",
     ]
+
+    st.markdown("#### 업로드 row별 고장 확률 그래프")
+    chart_df = result_df[["input_row", "xgboost_failure_probability"]].copy()
+    chart_df = chart_df.set_index("input_row")
+    st.bar_chart(chart_df, height=320)
+    st.caption(f"High Risk 기준 threshold: {selected_threshold:.2f}")
+
+    st.markdown("#### 예측 결과표")
     st.dataframe(
         result_df.sort_values("xgboost_failure_probability", ascending=False)[display_columns],
         width="stretch",
@@ -974,11 +1383,11 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     st.download_button(
         "예측 결과 CSV 다운로드",
         data=csv_bytes,
-        file_name="stage7_uploaded_predictions.csv",
+        file_name="uploaded_sensor_predictions.csv",
         mime="text/csv",
     )
 
-    st.subheader("Stage 8-lite 자연어 처방 초안")
+    st.subheader("선택 row 위험요인과 참고 권고")
     row_options = result_df["input_row"].tolist()
     default_row = (
         int(result_df.loc[result_df["risk_status"] == "High Risk", "input_row"].iloc[0])
@@ -986,7 +1395,7 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         else int(result_df.sort_values("xgboost_failure_probability", ascending=False)["input_row"].iloc[0])
     )
     selected_row = st.selectbox(
-        "처방 초안으로 볼 row",
+        "위험요인으로 볼 row",
         options=row_options,
         index=row_options.index(default_row),
         format_func=lambda row: (
@@ -1113,6 +1522,37 @@ def render_company_training_result(result: dict) -> None:
     with col4:
         metric_card("High Risk Rows", str(high_risk_count), "selected threshold")
 
+    if REQUIRED_FILES["metrics"].exists():
+        baseline_metrics = load_json(REQUIRED_FILES["metrics"])
+        baseline_xgb = baseline_metrics["models"]["xgboost"]
+        st.markdown("#### AI4I baseline 대비 재검증 요약")
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "구분": "AI4I baseline",
+                        "데이터": "public AI4I test split",
+                        "PR-AUC": baseline_xgb["pr_auc"],
+                        "F1-score": baseline_xgb["f1_score"],
+                        "주의": "공개 데이터 기준 성능",
+                    },
+                    {
+                        "구분": "업로드 CSV 재학습",
+                        "데이터": "uploaded labeled company CSV",
+                        "PR-AUC": xgboost_metrics["pr_auc"],
+                        "F1-score": xgboost_metrics["f1_score"],
+                        "주의": "업로드 데이터 split 기준 성능",
+                    },
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+        st.info(
+            "실제 회사 데이터가 아닌 샘플 CSV로 실행한 경우, 이 결과는 재검증 기능 확인용입니다. "
+            "실제 회사 데이터 성능 검증 완료라고 표현하지 않습니다."
+        )
+
     st.markdown("#### 모델 성능")
     metrics_df = pd.DataFrame(metrics["models"]).T.reset_index().rename(columns={"index": "model"})
     st.dataframe(metrics_df, width="stretch", hide_index=True)
@@ -1145,6 +1585,13 @@ def render_company_training_result(result: dict) -> None:
 
     if st.button("로컬 산출물로 저장", type="primary"):
         saved_paths = save_custom_training_outputs(result, COMPANY_OUTPUT_DIR)
+        record_audit(
+            "company_retraining.save_outputs",
+            "success",
+            "directory",
+            str(COMPANY_OUTPUT_DIR),
+            {"artifact_count": len(saved_paths)},
+        )
         st.success(f"저장 완료: {COMPANY_OUTPUT_DIR}")
         st.dataframe(
             pd.DataFrame(
@@ -1157,16 +1604,21 @@ def render_company_training_result(result: dict) -> None:
 
 def render_company_retraining_tab() -> None:
     """Render Stage 14-lite custom company CSV mapping and retraining PoC."""
-    st.subheader("Stage 14-lite 회사 데이터 재학습 PoC")
+    st.subheader("회사 CSV 재검증")
     st.caption(
         "라벨이 있는 회사 CSV를 업로드해 target, ID/time 컬럼, 단위 변환을 지정하고 "
         "회사 데이터 기준 Logistic Regression/XGBoost를 새로 학습합니다."
     )
-    st.markdown(
-        """
-        이 탭은 기존 AI4I 고정 모델을 그대로 쓰는 기능이 아니라, 업로드한 회사 데이터에 맞춰
-        모델을 다시 학습하는 로컬 PoC입니다. 라벨 없는 이상탐지, 클라우드 배포, 다중 사용자 운영은 아직 범위 밖입니다.
-        """
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"순서": 1, "사용자 입력": "라벨이 있는 회사 CSV", "확인 내용": "target label, 설비 ID, timestamp, 센서 feature"},
+                {"순서": 2, "사용자 선택": "target / ID-time / 단위 변환", "확인 내용": "학습 feature와 보존 컬럼 분리"},
+                {"순서": 3, "시스템 출력": "재학습 성능과 SHAP 요인", "확인 내용": "AI4I baseline 대비 회사 CSV split 성능"},
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
     )
 
     uploaded_file = st.file_uploader(
@@ -1237,9 +1689,32 @@ def render_company_retraining_tab() -> None:
             st.session_state["company_retraining_result"] = result
             st.success("회사 데이터 재학습이 완료되었습니다.")
         except Exception as error:
+            record_audit(
+                "company_retraining.run",
+                "failure",
+                "upload",
+                getattr(uploaded_file, "name", "company_csv"),
+                {
+                    "target_column": target_column,
+                    "id_time_columns": id_time_columns,
+                },
+                error_message=str(error),
+            )
             st.error("회사 데이터 재학습 중 문제가 발생했습니다.")
             st.exception(error)
             return
+        record_audit(
+            "company_retraining.run",
+            "success",
+            "upload",
+            getattr(uploaded_file, "name", "company_csv"),
+            {
+                "row_count": int(len(uploaded_df)),
+                "target_column": target_column,
+                "feature_count": len(feature_columns),
+                "best_model": result["metrics"]["best_model_by_pr_auc"],
+            },
+        )
 
     result = st.session_state.get("company_retraining_result")
     if result is not None:
@@ -1405,13 +1880,18 @@ def render_ai_report_tab(
     future_predictions: pd.DataFrame,
     ai_context: dict,
     saved_report: str,
+    genai_settings: dict,
 ) -> None:
     """Render saved and optional live GenAI manager reports."""
-    st.subheader("GenAI 관리자 참고 리포트")
+    st.subheader("GenAI 관리자 리포트 생성")
     st.caption(
-        "High Risk 또는 SPC 이상 row를 선택해 관리자 참고용 리포트를 생성합니다. "
-        "GEMINI_API_KEY 또는 OPENAI_API_KEY가 없으면 로컬 템플릿 fallback으로 안전하게 동작합니다."
+        "High Risk 또는 SPC 이상 row를 선택해 관리자 참고 리포트를 생성합니다. "
+        "API key는 왼쪽 사이드바에서 입력하며 파일에 저장하지 않습니다."
     )
+    if genai_settings.get("has_key"):
+        st.success(f"GenAI 상태: {genai_status_text(genai_settings)}")
+    else:
+        st.warning("GenAI 상태: API key 없음. 저장된 기본 리포트를 표시하고 새 API 호출은 비활성화합니다.")
 
     candidate_rows = spc_timeseries[
         (spc_timeseries["risk_status"] == "High Risk") | spc_timeseries["spc_risk_alert"]
@@ -1475,9 +1955,43 @@ def render_ai_report_tab(
         )
     st.dataframe(evidence_df, width="stretch", hide_index=True)
 
-    if st.button("선택 row로 AI 리포트 생성", type="primary"):
-        report, mode = genai_ai_report(context)
-        st.info(f"리포트 생성 모드: {mode}")
+    if st.button(
+        "선택 row로 GenAI 리포트 생성",
+        type="primary",
+        disabled=not genai_settings.get("has_key"),
+    ):
+        try:
+            report, mode = genai_report_with_sidebar_settings(context, genai_settings)
+        except Exception as error:
+            record_audit(
+                "genai.report",
+                "failure",
+                "time_step",
+                str(selected_time_step),
+                {
+                    "provider": genai_settings["provider"],
+                    "model": genai_settings["model"],
+                },
+                error_message=str(error),
+            )
+            st.error(
+                f"{genai_settings['provider_label']} API 호출에 실패했습니다. "
+                f"model={genai_settings['model']}. API key는 표시하거나 저장하지 않았습니다."
+            )
+            st.code(str(error), language="text")
+            return
+        record_audit(
+            "genai.report",
+            "success",
+            "time_step",
+            str(selected_time_step),
+            {
+                "provider": genai_settings["provider"],
+                "model": genai_settings["model"],
+                "mode": mode,
+            },
+        )
+        st.success(f"리포트 생성 모드: {mode}")
         st.markdown(report)
         st.download_button(
             "생성 리포트 다운로드",
@@ -1551,12 +2065,265 @@ def render_stage10_operations_tab(
     st.markdown(stage10_operations)
 
 
+def initialize_stage19_form_defaults() -> None:
+    """Set product-style default values for the field-event form."""
+    normal_row = STAGE19_SENSOR_PRESETS["Normal 샘플"]
+    defaults = {
+        "stage19_equipment_id": "press-01",
+        "stage19_event_timestamp": datetime.now().astimezone().replace(microsecond=0).isoformat(),
+        "stage19_source_system": "streamlit_dashboard",
+        "stage19_type": normal_row["Type"],
+        "stage19_air_temp": float(normal_row["Air temperature [K]"]),
+        "stage19_process_temp": float(normal_row["Process temperature [K]"]),
+        "stage19_rotational_speed": int(normal_row["Rotational speed [rpm]"]),
+        "stage19_torque": float(normal_row["Torque [Nm]"]),
+        "stage19_tool_wear": int(normal_row["Tool wear [min]"]),
+    }
+    for key, value in defaults.items():
+        st.session_state.setdefault(key, value)
+
+
+def apply_stage19_preset(preset_name: str) -> None:
+    """Apply one sensor preset to the field-event form."""
+    row = STAGE19_SENSOR_PRESETS[preset_name]
+    st.session_state["stage19_type"] = row["Type"]
+    st.session_state["stage19_air_temp"] = float(row["Air temperature [K]"])
+    st.session_state["stage19_process_temp"] = float(row["Process temperature [K]"])
+    st.session_state["stage19_rotational_speed"] = int(row["Rotational speed [rpm]"])
+    st.session_state["stage19_torque"] = float(row["Torque [Nm]"])
+    st.session_state["stage19_tool_wear"] = int(row["Tool wear [min]"])
+
+
+def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> None:
+    """Render sensor event and work-order decision controls."""
+    initialize_stage19_form_defaults()
+    last_message = st.session_state.pop("operations_last_message", None)
+    if last_message:
+        st.success(last_message)
+
+    st.markdown("#### 센서 row 입력")
+    st.caption(
+        "단일 설비의 센서 값을 입력하면 로컬 예측 함수가 고장 확률과 High Risk 여부를 계산하고, "
+        "event, 작업지시 초안, 승인/검토/반려 기록을 SQLite와 CSV export에 저장합니다."
+    )
+
+    with st.expander("센서 row 입력 및 event 생성", expanded=True):
+        st.markdown("단일 설비 센서 row를 직접 입력하거나 아래 프리셋으로 빠르게 채울 수 있습니다.")
+        preset_col1, preset_col2 = st.columns(2)
+        with preset_col1:
+            if st.button("Normal 샘플 채우기", key="stage19_normal_preset"):
+                apply_stage19_preset("Normal 샘플")
+                st.rerun()
+        with preset_col2:
+            if st.button("High Risk 샘플 채우기", key="stage19_high_risk_preset"):
+                apply_stage19_preset("High Risk 샘플")
+                st.rerun()
+
+        with st.form("stage19_field_event_form"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                equipment_id = st.text_input("Equipment ID", key="stage19_equipment_id")
+            with col2:
+                event_timestamp = st.text_input(
+                    "Event timestamp",
+                    key="stage19_event_timestamp",
+                )
+            with col3:
+                source_system = st.text_input("Source system", key="stage19_source_system")
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                type_value = st.selectbox("Type", options=["L", "M", "H"], key="stage19_type")
+                air_temp = st.number_input("Air temperature [K]", step=0.1, key="stage19_air_temp")
+            with col2:
+                process_temp = st.number_input(
+                    "Process temperature [K]",
+                    step=0.1,
+                    key="stage19_process_temp",
+                )
+                rotational_speed = st.number_input(
+                    "Rotational speed [rpm]",
+                    step=1,
+                    key="stage19_rotational_speed",
+                )
+            with col3:
+                torque = st.number_input("Torque [Nm]", step=0.1, key="stage19_torque")
+                tool_wear = st.number_input("Tool wear [min]", step=1, key="stage19_tool_wear")
+
+            submitted = st.form_submit_button("field-event 생성", type="primary")
+
+        if submitted:
+            row = {
+                "Type": type_value,
+                "Air temperature [K]": float(air_temp),
+                "Process temperature [K]": float(process_temp),
+                "Rotational speed [rpm]": int(rotational_speed),
+                "Torque [Nm]": float(torque),
+                "Tool wear [min]": int(tool_wear),
+            }
+            try:
+                event = predict_field_event(
+                    equipment_id=equipment_id,
+                    event_timestamp=event_timestamp,
+                    source_system=source_system,
+                    row=row,
+                    persist=True,
+                    db_path=OPERATIONS_DB_PATH,
+                )
+            except Exception as error:
+                record_audit(
+                    "field_event.create",
+                    "failure",
+                    "equipment",
+                    equipment_id,
+                    {"source_system": source_system},
+                    error_message=str(error),
+                )
+                st.error("field-event 생성 중 문제가 발생했습니다.")
+                st.exception(error)
+            else:
+                record_audit(
+                    "field_event.create",
+                    "success",
+                    "event",
+                    event["event_id"],
+                    {
+                        "equipment_id": equipment_id,
+                        "source_system": source_system,
+                        "risk_status": event["risk_status"],
+                        "probability": event["probability"],
+                    },
+                )
+                st.session_state["operations_last_message"] = (
+                    f"event 생성 완료: {event['event_id']} / {event['risk_status']}"
+                )
+                st.rerun()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("#### 작업지시 초안 생성")
+        if not events:
+            st.info("먼저 field-event 또는 예측 event를 생성하세요.")
+        else:
+            event_map = {event["event_id"]: event for event in events}
+            selected_event_id = st.selectbox(
+                "Draft를 만들 event",
+                options=list(event_map),
+                format_func=lambda event_id: (
+                    f"{event_map[event_id]['risk_status']} / "
+                    f"{event_map[event_id]['probability']:.4f} / {event_id[:8]}"
+                ),
+                key="stage20_draft_event_select",
+            )
+            if st.button("작업지시 초안 생성", key="create_stage20_draft"):
+                try:
+                    draft = create_work_order_draft(
+                        event_map[selected_event_id],
+                        db_path=OPERATIONS_DB_PATH,
+                    )
+                except Exception as error:
+                    record_audit(
+                        "work_order_draft.create",
+                        "failure",
+                        "event",
+                        selected_event_id,
+                        error_message=str(error),
+                    )
+                    st.error("작업지시 초안 생성 중 문제가 발생했습니다.")
+                    st.exception(error)
+                else:
+                    record_audit(
+                        "work_order_draft.create",
+                        "success",
+                        "draft",
+                        draft["draft_id"],
+                        {"event_id": draft["event_id"]},
+                    )
+                    st.session_state["operations_last_message"] = (
+                        f"작업지시 초안 생성 완료: {draft['draft_id']}"
+                    )
+                    st.rerun()
+
+    with col2:
+        st.markdown("#### 승인/검토/반려 결정")
+        if not drafts:
+            st.info("먼저 작업지시 초안을 생성하세요.")
+        else:
+            draft_map = {draft["draft_id"]: draft for draft in drafts}
+            selected_draft_id = st.selectbox(
+                "결정할 draft",
+                options=list(draft_map),
+                format_func=lambda draft_id: (
+                    f"{draft_map[draft_id]['created_at']} / {draft_id[:8]}"
+                ),
+                key="stage20_decision_draft_select",
+            )
+            decision = st.radio(
+                "Decision",
+                options=["approve", "needs_review", "reject"],
+                horizontal=True,
+                key="stage20_decision_radio",
+                format_func=lambda value: {
+                    "approve": "승인 approve",
+                    "needs_review": "검토 필요 needs_review",
+                    "reject": "반려 reject",
+                }[value],
+            )
+            operator_id = st.text_input(
+                "Operator ID",
+                value=current_actor().get("actor_id", "operator_01"),
+                key="stage20_operator_id",
+            )
+            note = st.text_area(
+                "Note",
+                value="Reviewed from the predictive maintenance dashboard.",
+                key="stage20_decision_note",
+            )
+            if st.button("결정 기록 저장", key="save_stage20_decision"):
+                try:
+                    saved = create_work_order_decision(
+                        draft_id=selected_draft_id,
+                        decision=decision,
+                        operator_id=operator_id,
+                        note=note,
+                        db_path=OPERATIONS_DB_PATH,
+                    )
+                except Exception as error:
+                    record_audit(
+                        "work_order_decision.create",
+                        "failure",
+                        "draft",
+                        selected_draft_id,
+                        {"decision": decision, "operator_id": operator_id},
+                        error_message=str(error),
+                    )
+                    st.error("결정 기록 중 문제가 발생했습니다.")
+                    st.exception(error)
+                else:
+                    record_audit(
+                        "work_order_decision.create",
+                        "success",
+                        "decision",
+                        saved["decision_id"],
+                        {
+                            "draft_id": selected_draft_id,
+                            "event_id": saved["event_id"],
+                            "decision": saved["decision"],
+                            "operator_id": operator_id,
+                            "retraining_candidate": saved["decision"] == "needs_review",
+                        },
+                    )
+                    st.session_state["operations_last_message"] = (
+                        f"decision 저장 완료: {saved['decision_id']} / {saved['decision']}"
+                    )
+                    st.rerun()
+
+
 def render_stage15_20_operations_tab(ai_context: dict) -> None:
     """Render local API, SQLite event history, and work-order decision status."""
-    st.subheader("Stage 15~20 로컬 운영 통합 PoC")
+    st.subheader("승인형 작업지시 운영 PoC")
     st.caption(
-        "file-drop streaming, FastAPI, Stage 19 field-event, SQLite 이력, "
-        "Stage 20 operator decision logging을 로컬에서 실제 호출/저장 흐름으로 검증합니다."
+        "센서 row 입력부터 event 생성, 작업지시 초안, 작업자 승인/검토/반려 기록까지 한 흐름으로 확인합니다."
     )
 
     st.markdown(
@@ -1592,16 +2359,18 @@ def render_stage15_20_operations_tab(ai_context: dict) -> None:
     with col4:
         metric_card("Decisions", str(len(decisions)), "approve/reject/review")
 
-    st.markdown("#### 실행 명령")
-    st.code(
-        ".\\run_stage1_20_gemini.ps1\n"
-        "# OpenAI 경로를 쓰려면 .\\run_stage1_20_openai.ps1\n"
-        ".\\.venv\\Scripts\\python.exe -m uvicorn src.api_server:app --host 127.0.0.1 --port 8000\n"
-        ".\\.venv\\Scripts\\python.exe src\\verify_stage19_20_integration.py",
-        language="powershell",
-    )
+    render_stage19_20_input_controls(events, drafts)
 
-    st.markdown("#### 최근 예측 이벤트")
+    with st.expander("개발/검증 실행 명령 보기"):
+        st.code(
+            ".\\run_stage1_20_gemini.ps1\n"
+            "# OpenAI 경로를 쓰려면 .\\run_stage1_20_openai.ps1\n"
+            ".\\.venv\\Scripts\\python.exe -m uvicorn src.api_server:app --host 127.0.0.1 --port 8000\n"
+            ".\\.venv\\Scripts\\python.exe src\\verify_stage19_20_integration.py",
+            language="powershell",
+        )
+
+    st.markdown("#### 최근 기록: 예측 이벤트")
     if events:
         event_rows = []
         for event in events:
@@ -1624,7 +2393,7 @@ def render_stage15_20_operations_tab(ai_context: dict) -> None:
     else:
         st.info("아직 `outputs/operations.db`에 저장된 예측 이벤트가 없습니다.")
 
-    st.markdown("#### 최근 작업지시 초안")
+    st.markdown("#### 최근 기록: 작업지시 초안")
     if drafts:
         draft_rows = [
             {
@@ -1647,8 +2416,13 @@ def render_stage15_20_operations_tab(ai_context: dict) -> None:
     else:
         st.info("아직 생성된 작업지시 초안이 없습니다.")
 
-    st.markdown("#### Stage 20 operator decision 기록")
+    st.markdown("#### 최근 기록: operator decision")
     if decisions:
+        action_labels = {
+            "approve": "승인됨: 작업자가 현장 점검을 허용",
+            "reject": "반려됨: 초안은 실행하지 않음",
+            "needs_review": "보류됨: 관리자 검토 및 재학습 후보",
+        }
         decision_rows = [
             {
                 "created_at": decision["created_at"],
@@ -1657,6 +2431,8 @@ def render_stage15_20_operations_tab(ai_context: dict) -> None:
                 "event_id": decision["event_id"],
                 "operator_id": decision["operator_id"],
                 "decision": decision["decision"],
+                "action_history": action_labels.get(decision["decision"], "기록됨"),
+                "retraining_candidate": decision["decision"] == "needs_review",
                 "note": decision["note"],
             }
             for decision in decisions
@@ -1670,11 +2446,16 @@ def render_stage15_20_operations_tab(ai_context: dict) -> None:
                 mime="text/csv",
             )
     else:
-        st.info("아직 Stage 20 operator decision 기록이 없습니다.")
+        st.info("아직 operator decision 기록이 없습니다.")
 
-    st.markdown("#### Stage 15~20 아키텍처 문서")
+    mock_summary = load_optional_markdown(OPTIONAL_FILES["mock_bridge_summary"])
+    if mock_summary:
+        with st.expander("MQTT/OPC UA local mock bridge 실행 요약"):
+            st.markdown(mock_summary)
+
     if STAGE15_20_ARCHITECTURE_PATH.exists():
-        st.markdown(STAGE15_20_ARCHITECTURE_PATH.read_text(encoding="utf-8"))
+        with st.expander("상세 아키텍처 문서 보기"):
+            st.markdown(STAGE15_20_ARCHITECTURE_PATH.read_text(encoding="utf-8"))
     else:
         st.info("`src\\verify_stage19_20_integration.py` 실행 후 문서가 생성됩니다.")
 
@@ -1683,6 +2464,239 @@ def render_markdown_tab(title: str, markdown_text: str) -> None:
     """Render a Markdown output file inside a tab."""
     st.subheader(title)
     st.markdown(markdown_text)
+
+
+def render_comparison_evidence() -> None:
+    """Show optional comparison artifacts without blocking the dashboard."""
+    model_summary = load_optional_markdown(OPTIONAL_FILES["model_strategy_summary"])
+    spc_summary = load_optional_markdown(OPTIONAL_FILES["spc_vs_ml_summary"])
+
+    if not model_summary and not spc_summary:
+        st.info(
+            "비교 실험 산출물이 아직 없습니다. "
+            "`src\\compare_model_strategies.py`와 `src\\compare_spc_ml_alerts.py`를 실행하면 여기에 표시됩니다."
+        )
+        return
+
+    st.markdown("#### 비교 실험 근거")
+    if OPTIONAL_FILES["model_strategy_comparison"].exists():
+        strategy_df = pd.read_csv(OPTIONAL_FILES["model_strategy_comparison"])
+        display_columns = [
+            "display_name",
+            "threshold",
+            "precision",
+            "recall",
+            "f1_score",
+            "pr_auc",
+            "alert_count",
+            "false_positive",
+            "false_negative",
+        ]
+        st.dataframe(strategy_df[display_columns], width="stretch", hide_index=True)
+    if OPTIONAL_FILES["model_strategy_pr_curve"].exists():
+        st.image(
+            str(OPTIONAL_FILES["model_strategy_pr_curve"]),
+            caption="Model strategy PR curve comparison",
+            width="stretch",
+        )
+    if model_summary:
+        with st.expander("SMOTE / threshold 비교 요약"):
+            st.markdown(model_summary)
+
+    if OPTIONAL_FILES["spc_vs_ml_comparison"].exists():
+        spc_df = pd.read_csv(OPTIONAL_FILES["spc_vs_ml_comparison"])
+        display_columns = [
+            "display_name",
+            "precision",
+            "recall",
+            "f1_score",
+            "alert_count",
+            "false_positive",
+            "false_negative",
+        ]
+        st.dataframe(spc_df[display_columns], width="stretch", hide_index=True)
+    if spc_summary:
+        with st.expander("SPC-only vs ML+SPC 비교 요약"):
+            st.markdown(spc_summary)
+
+
+def render_final_demo_tab(
+    metrics: dict,
+    threshold_summary: dict,
+    predictions: pd.DataFrame,
+    spc_summary: dict,
+    ai_context: dict,
+    genai_settings: dict,
+) -> None:
+    """Render a compact first tab for final presentation flow."""
+    xgboost = metrics["models"]["xgboost"]
+    selected_threshold = float(threshold_summary["selected_threshold"])
+    high_risk_count = int((predictions["xgboost_probability"] >= selected_threshold).sum())
+    actual_failures = int(predictions["actual_machine_failure"].sum())
+    report_mode = str(ai_context.get("report_generation_mode", "not generated"))
+
+    st.subheader("최종발표 Demo")
+    st.caption(
+        "센서 데이터 입력부터 그래프, 리포트, 승인형 작업지시까지 발표 흐름을 한 번에 요약합니다."
+    )
+
+    st.markdown("#### 최종발표 시연 동선")
+    step_col1, step_col2, step_col3, step_col4 = st.columns(4)
+    with step_col1:
+        metric_card("1. API key", "선택", "사이드바에 입력")
+    with step_col2:
+        metric_card("2. CSV 업로드", "필수", "샘플 CSV 제공")
+    with step_col3:
+        metric_card("3. 예측/그래프", "자동", "확률·SPC·SHAP")
+    with step_col4:
+        metric_card("4. 작업지시 승인", "선택", "approve/review/reject")
+
+    st.markdown("#### 입력하면 나오는 것")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"출력": "고장 확률", "설명": "각 row의 XGBoost failure probability"},
+                {"출력": "High Risk 판정", "설명": f"선택 threshold {selected_threshold:.2f} 기준"},
+                {"출력": "그래프", "설명": "업로드 row 확률 bar chart, SPC trend/control chart, SHAP 요인"},
+                {"출력": "GenAI 리포트", "설명": "API key가 있으면 Gemini/OpenAI 관리자 참고 리포트 생성"},
+                {"출력": "작업지시 workflow", "설명": "field-event, draft, approve/reject/needs_review 기록"},
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+    st.info("업로드 데이터 예측은 `CSV 업로드 예측` 탭에서 수행합니다. 이 탭은 발표 첫 화면용 요약입니다.")
+
+    st.markdown("#### 현재 검증 상태")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        metric_card("Best Model", "XGBoost", f"PR-AUC {xgboost['pr_auc']:.4f}")
+    with col2:
+        metric_card("Threshold", f"{selected_threshold:.2f}", "F1-score 기준")
+    with col3:
+        metric_card("High Risk Rows", str(high_risk_count), f"actual failures {actual_failures}")
+    with col4:
+        metric_card("GenAI Mode", report_mode.split(":")[0], report_mode)
+
+    with st.expander("발표 클릭 순서 보기"):
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "순서": 1,
+                        "탭": "CSV 업로드 예측",
+                        "보여줄 것": "샘플 CSV 다운로드, 업로드 후 예측 결과와 확률 그래프",
+                    },
+                    {
+                        "순서": 2,
+                        "탭": "Predictive SPC",
+                        "보여줄 것": "시간축 playback, risk trend, control chart",
+                    },
+                    {
+                        "순서": 3,
+                        "탭": "GenAI 리포트",
+                        "보여줄 것": "Gemini/OpenAI 기반 관리자 참고 리포트",
+                    },
+                    {
+                        "순서": 4,
+                        "탭": "운영 PoC",
+                        "보여줄 것": "field-event, 작업지시 초안, operator decision 기록",
+                    },
+                    {
+                        "순서": 5,
+                        "탭": "한계와 확장",
+                        "보여줄 것": "비교 실험과 로컬 PoC 범위",
+                    },
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+
+    st.markdown("#### 핵심 그래프")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image(str(REQUIRED_FILES["spc_risk_chart"]), caption="Predictive SPC risk trend", width="stretch")
+    with col2:
+        st.image(str(REQUIRED_FILES["shap_bar"]), caption="SHAP feature importance", width="stretch")
+
+    st.download_button(
+        "발표용 샘플 CSV 다운로드",
+        data=csv_download_bytes(sample_field_dataframe()),
+        file_name="sample_field_sensor_rows.csv",
+        mime="text/csv",
+    )
+    st.info(
+        "발표 표현은 'Stage 1~20 로컬 통합 PoC'입니다. 실제 PLC/SCADA/클라우드 배포 완료로 말하지 않습니다."
+    )
+
+
+def render_development_tab_overview() -> None:
+    """Show a small warning before detailed development-only tabs."""
+    st.info(
+        "개발/검증 상세 탭은 발표 준비와 산출물 확인용입니다. "
+        "최종발표 시연은 사이드바 옵션을 끄고 기본 7개 탭만 사용하는 것을 권장합니다."
+    )
+
+def render_limitations_tab(stage9_applicability: str, stage19_20_design: str, final_roadmap: str) -> None:
+    """Render thesis-safe limitations and next expansion notes."""
+    st.subheader("한계와 확장 계획")
+    st.markdown(
+        """
+        - 현재 구현은 공개 AI4I 데이터와 로컬 파일/API/SQLite 기반 PoC입니다.
+        - 실시간 공장 센서, PLC/SCADA, MQTT/OPC UA, 클라우드 운영 배포는 아직 완료 범위가 아닙니다.
+        - GenAI 리포트와 작업지시 초안은 관리자 참고용이며 자동 정비 명령이 아닙니다.
+        - 실제 현장 적용 전에는 회사별 데이터 매핑, 단위 표준화, threshold 재조정, 권한/감사 로그 설계가 필요합니다.
+        """
+    )
+
+    st.markdown("#### 실제/샘플 회사 CSV 재검증 시 확인할 항목")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "구분": "데이터 스키마",
+                    "확인 내용": "AI4I 호환 센서 컬럼 또는 mapping.json으로 변환 가능한 컬럼인지 확인",
+                    "현재 구현": "Stage 14 company adapter와 CSV 업로드 PoC",
+                },
+                {
+                    "구분": "라벨 품질",
+                    "확인 내용": "정상/고장 라벨 기준, timestamp, 설비 ID 정의가 일관적인지 확인",
+                    "현재 구현": "라벨 있는 회사 CSV 재학습 및 test split 평가",
+                },
+                {
+                    "구분": "불균형 처리",
+                    "확인 내용": "기본 모델과 SMOTE 모델의 precision/recall/F1 trade-off 비교",
+                    "현재 구현": "model_strategy_comparison 산출물",
+                },
+                {
+                    "구분": "운영 적용성",
+                    "확인 내용": "alert 수, false alarm 수, 작업자 승인/보류 이력을 함께 검토",
+                    "현재 구현": "SQLite event, work-order draft, operator decision log",
+                },
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+
+    st.markdown("#### 데모 배포 준비 범위")
+    st.markdown(
+        """
+        - Streamlit Cloud 또는 Hugging Face Spaces에는 코드와 공개 산출물만 올리고, API key는 platform secret으로 설정합니다.
+        - `outputs/operations.db`, `.venv`, `.env`, 개인 발표 파일, 실제 회사 원본 데이터는 업로드 대상이 아닙니다.
+        - 클라우드 배포가 되더라도 이는 발표용 웹 데모이며 실제 공장 운영 배포 완료를 의미하지 않습니다.
+        """
+    )
+
+    render_comparison_evidence()
+
+    with st.expander("Stage 9 실제 적용성 문서"):
+        st.markdown(stage9_applicability)
+    with st.expander("Stage 19~20 운영 설계"):
+        st.markdown(stage19_20_design)
+    with st.expander("최종 단계 로드맵"):
+        st.markdown(final_roadmap)
 
 
 def main() -> None:
@@ -1715,6 +2729,58 @@ def main() -> None:
     future_metrics = load_json(REQUIRED_FILES["future_metrics"])
     ai_context = load_json(REQUIRED_FILES["ai_report_context"])
     ai_manager_report = load_markdown(REQUIRED_FILES["ai_manager_report"])
+
+    genai_settings = render_genai_sidebar_settings()
+
+    show_full_dev_tabs = st.sidebar.checkbox(
+        "개발/검증 상세 탭 보기",
+        value=False,
+        help="최종 발표 기본 화면은 핵심 7개 탭만 보여줍니다. 개발/검증용 22개 상세 탭이 필요할 때만 켜세요.",
+    )
+    st.sidebar.caption("기본값은 최종 발표 모드입니다.")
+
+    if not show_full_dev_tabs:
+        tabs = st.tabs(
+            [
+                "최종 Demo",
+                "성과 요약",
+                "CSV 업로드 예측",
+                "Predictive SPC",
+                "GenAI 리포트",
+                "운영 PoC",
+                "한계와 확장",
+            ]
+        )
+
+        with tabs[0]:
+            render_final_demo_tab(
+                metrics,
+                threshold_summary,
+                predictions,
+                spc_summary,
+                ai_context,
+                genai_settings,
+            )
+        with tabs[1]:
+            render_summary_tab(metrics, threshold_summary)
+        with tabs[2]:
+            render_field_csv_tab(threshold_summary)
+        with tabs[3]:
+            render_predictive_spc_tab(spc_summary, spc_timeseries)
+        with tabs[4]:
+            render_ai_report_tab(
+                spc_summary,
+                spc_timeseries,
+                future_predictions,
+                ai_context,
+                ai_manager_report,
+                genai_settings,
+            )
+        with tabs[5]:
+            render_stage15_20_operations_tab(ai_context)
+        with tabs[6]:
+            render_limitations_tab(stage9_applicability, stage19_20_design, final_roadmap)
+        return
 
     tabs = st.tabs(
         [
@@ -1770,6 +2836,7 @@ def main() -> None:
             future_predictions,
             ai_context,
             ai_manager_report,
+            genai_settings,
         )
     with tabs[8]:
         render_field_csv_tab(threshold_summary)
@@ -1799,6 +2866,545 @@ def main() -> None:
         render_markdown_tab("Stage 19~20 운영 설계", stage19_20_design)
     with tabs[21]:
         render_markdown_tab("최종 단계 로드맵", final_roadmap)
+
+
+USER_REQUIRED_FILE_KEYS = (
+    "metrics",
+    "threshold",
+    "predictions",
+    "spc_timeseries",
+    "spc_summary",
+    "spc_risk_chart",
+    "spc_control_chart",
+    "future_predictions",
+    "ai_report_context",
+    "ai_manager_report",
+    "shap_bar",
+)
+
+ADMIN_REQUIRED_FILE_KEYS = tuple(REQUIRED_FILES.keys())
+
+
+def ensure_required_files(file_keys: tuple[str, ...]) -> None:
+    """Stop the app with recovery guidance when required outputs are missing."""
+    missing_files = [REQUIRED_FILES[key] for key in file_keys if not REQUIRED_FILES[key].exists()]
+    if missing_files:
+        show_missing_files(missing_files)
+        st.stop()
+
+
+def render_start_tab(
+    metrics: dict,
+    threshold_summary: dict,
+    predictions: pd.DataFrame,
+    ai_context: dict,
+) -> None:
+    """Render the product-style first screen for operators and reviewers."""
+    xgboost = metrics["models"]["xgboost"]
+    selected_threshold = float(threshold_summary["selected_threshold"])
+    high_risk_count = int((predictions["xgboost_probability"] >= selected_threshold).sum())
+    report_mode = str(ai_context.get("report_generation_mode", "not generated"))
+
+    st.subheader("시작하기")
+    st.caption("센서 CSV를 넣으면 예측, 그래프, 리포트, 승인형 작업지시 흐름을 순서대로 확인할 수 있습니다.")
+
+    step_col1, step_col2, step_col3, step_col4 = st.columns(4)
+    with step_col1:
+        metric_card("1. 데이터 준비", "CSV", "샘플 파일 제공")
+    with step_col2:
+        metric_card("2. 예측 실행", "자동", "확률·High Risk")
+    with step_col3:
+        metric_card("3. 그래프 확인", "SPC", "추세·관리한계")
+    with step_col4:
+        metric_card("4. 조치 기록", "승인형", "approve/review/reject")
+
+    st.markdown("#### 입력하면 나오는 것")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"출력": "고장 확률", "설명": "각 row의 XGBoost failure probability"},
+                {"출력": "High Risk 판정", "설명": f"선택 threshold {selected_threshold:.2f} 기준"},
+                {"출력": "그래프", "설명": "업로드 row 확률 bar chart, SPC trend/control chart, SHAP 요인"},
+                {"출력": "GenAI 리포트", "설명": "API key가 있으면 Gemini/OpenAI 관리자 참고 리포트 생성"},
+                {"출력": "작업지시 이력", "설명": "field-event, draft, approve/reject/needs_review 기록"},
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        metric_card("Best Model", "XGBoost", f"PR-AUC {xgboost['pr_auc']:.4f}")
+    with col2:
+        metric_card("Threshold", f"{selected_threshold:.2f}", "F1-score 기준")
+    with col3:
+        metric_card("High Risk Rows", str(high_risk_count), f"test rows {len(predictions)}")
+    with col4:
+        metric_card("GenAI Mode", report_mode.split(":")[0], report_mode)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image(str(REQUIRED_FILES["spc_risk_chart"]), caption="Predictive SPC risk trend", width="stretch")
+    with col2:
+        st.image(str(REQUIRED_FILES["shap_bar"]), caption="SHAP feature importance", width="stretch")
+
+    st.download_button(
+        "샘플 센서 CSV 다운로드",
+        data=csv_download_bytes(sample_field_dataframe()),
+        file_name="sample_field_sensor_rows.csv",
+        mime="text/csv",
+    )
+
+
+def render_product_summary_tab(metrics: dict, threshold_summary: dict) -> None:
+    """Render model quality without presentation-only wording."""
+    xgboost = metrics["models"]["xgboost"]
+    selected = threshold_summary["selected_metrics"]
+    selected_threshold = float(threshold_summary["selected_threshold"])
+
+    st.subheader("성과 요약")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        metric_card("Best Model", "XGBoost", "PR-AUC 기준")
+    with col2:
+        metric_card("XGBoost PR-AUC", f"{xgboost['pr_auc']:.4f}", "불균형 데이터 평가")
+    with col3:
+        metric_card("Threshold", f"{selected_threshold:.2f}", "F1-score 기준 선택")
+    with col4:
+        metric_card("F1-score", f"{selected['f1_score']:.4f}", "선택 threshold 기준")
+
+    st.markdown(
+        f"""
+        <div class="callout">
+        이 대시보드는 공개 AI4I 2020 데이터로 학습된 예지보전 모델을 사용합니다.
+        XGBoost가 PR-AUC 기준 대표 모델이며, threshold {selected_threshold:.2f}를 기준으로
+        High Risk row를 구분합니다. 실제 사업장 적용 전에는 회사 데이터로 threshold와 성능을 다시 검증해야 합니다.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_scope_tab() -> None:
+    """Render product-scope notes without mixing in development tabs."""
+    st.subheader("적용 범위")
+    st.markdown(
+        """
+        이 앱은 센서 CSV 기반 예지보전 의사결정을 체험하고 검증하기 위한 제품형 MVP입니다.
+
+        - 지원 입력: AI4I-compatible 센서 CSV 또는 화면 직접 입력 row
+        - 지원 출력: 고장 확률, High Risk 판정, SPC 그래프, SHAP 요인, GenAI 관리자 참고 리포트, 승인형 작업지시 이력
+        - 저장 이력: 로컬 SQLite와 CSV export
+        - GenAI key: 현재 Streamlit 세션에서만 사용하며 파일에 저장하지 않음
+
+        아직 포함하지 않는 범위:
+
+        - 실제 PLC/SCADA 운영망 연결 완료
+        - 실제 공장 센서 스트림 운영 배포
+        - 무인 자동 정비 명령 실행
+        - 다중 사용자 로그인/권한, 운영 DB, 감사 로그, 모니터링 체계
+        - 현장 회사 데이터 기반 성능 실증 수치
+        """
+    )
+    render_comparison_evidence()
+
+
+def render_work_order_tab(ai_context: dict) -> None:
+    """Render product-style field event and work-order workflow."""
+    st.subheader("작업지시")
+    st.caption("센서 row 입력부터 event 생성, 작업지시 초안, 승인/검토/반려 기록까지 한 흐름으로 관리합니다.")
+
+    if OPERATIONS_DB_PATH.exists():
+        events = list_prediction_events(limit=25, db_path=OPERATIONS_DB_PATH)
+        drafts = list_work_order_drafts(limit=10, db_path=OPERATIONS_DB_PATH)
+        decisions = list_work_order_decisions(limit=10, db_path=OPERATIONS_DB_PATH)
+    else:
+        events = []
+        drafts = []
+        decisions = []
+
+    field_events = [event for event in events if str(event.get("source", "")).startswith("field_event:")]
+    report_mode = str(ai_context.get("report_generation_mode", "not generated"))
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        metric_card("GenAI Report", report_mode.split(":")[0], report_mode)
+    with col2:
+        metric_card("Field Events", str(len(field_events)), "sensor event")
+    with col3:
+        metric_card("Drafts", str(len(drafts)), "human approval")
+    with col4:
+        metric_card("Decisions", str(len(decisions)), "approval log")
+
+    render_stage19_20_input_controls(events, drafts)
+
+    st.markdown("#### 최근 event")
+    if events:
+        event_rows = []
+        for event in events:
+            top_factor = event.get("top_shap_factors", [{}])[0].get("feature", "")
+            event_input = event.get("input", {})
+            event_rows.append(
+                {
+                    "created_at": event["created_at"],
+                    "source": event["source"],
+                    "equipment_id": event_input.get("equipment_id", ""),
+                    "event_timestamp": event_input.get("event_timestamp", ""),
+                    "event_id": event["event_id"],
+                    "probability": event["probability"],
+                    "threshold": event["threshold"],
+                    "risk_status": event["risk_status"],
+                    "top_factor": top_factor,
+                }
+            )
+        st.dataframe(pd.DataFrame(event_rows), width="stretch", hide_index=True)
+    else:
+        st.info("아직 저장된 예측 event가 없습니다.")
+
+    st.markdown("#### 최근 작업지시 초안")
+    if drafts:
+        draft_rows = [
+            {
+                "created_at": draft["created_at"],
+                "draft_id": draft["draft_id"],
+                "event_id": draft["event_id"],
+                "requires_human_approval": draft["draft_json"].get("requires_human_approval"),
+                "draft_path": draft["draft_path"],
+            }
+            for draft in drafts
+        ]
+        st.dataframe(pd.DataFrame(draft_rows), width="stretch", hide_index=True)
+    else:
+        st.info("아직 생성된 작업지시 초안이 없습니다.")
+
+    st.markdown("#### 최근 승인/검토/반려 기록")
+    if decisions:
+        action_labels = {
+            "approve": "승인: 작업자가 현장 조치를 진행할 수 있음",
+            "reject": "반려: 초안을 실행하지 않음",
+            "needs_review": "검토 필요: 관리자 재검토와 재학습 후보로 표시",
+        }
+        decision_rows = [
+            {
+                "created_at": decision["created_at"],
+                "decision_id": decision["decision_id"],
+                "draft_id": decision["draft_id"],
+                "event_id": decision["event_id"],
+                "operator_id": decision["operator_id"],
+                "decision": decision["decision"],
+                "action_history": action_labels.get(decision["decision"], "기록됨"),
+                "retraining_candidate": decision["decision"] == "needs_review",
+                "note": decision["note"],
+            }
+            for decision in decisions
+        ]
+        st.dataframe(pd.DataFrame(decision_rows), width="stretch", hide_index=True)
+        if WORK_ORDER_DECISIONS_PATH.exists():
+            st.download_button(
+                "작업지시 결정 이력 CSV 다운로드",
+                data=WORK_ORDER_DECISIONS_PATH.read_bytes(),
+                file_name="work_order_decisions.csv",
+                mime="text/csv",
+            )
+    else:
+        st.info("아직 승인/검토/반려 기록이 없습니다.")
+
+
+def scan_api_key_patterns() -> list[dict]:
+    """Scan repo text artifacts for accidental API key-like strings."""
+    patterns = [
+        re.compile(r"AIza[0-9A-Za-z_-]{20,}"),
+        re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+        re.compile(r"sk-proj-[A-Za-z0-9_-]{20,}"),
+    ]
+    excluded_parts = {".git", ".venv", "__pycache__"}
+    suffixes = {".py", ".md", ".ps1", ".bat", ".json", ".csv", ".txt", ".toml", ".yml", ".yaml"}
+    hits = []
+    for path in PROJECT_ROOT.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in suffixes:
+            continue
+        if any(part in excluded_parts for part in path.parts):
+            continue
+        if path.name == "operations.db":
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except Exception:
+            continue
+        for line_number, line in enumerate(lines, start=1):
+            if any(pattern.search(line) for pattern in patterns):
+                hits.append(
+                    {
+                        "path": str(path.relative_to(PROJECT_ROOT)),
+                        "line": line_number,
+                        "preview": line[:120],
+                    }
+                )
+    return hits
+
+
+def render_admin_monitoring(ai_context: dict) -> None:
+    """Render product MVP health, audit, and artifact monitoring."""
+    st.subheader("운영 모니터링")
+    events = list_prediction_events(limit=1000, db_path=OPERATIONS_DB_PATH)
+    drafts = list_work_order_drafts(limit=1000, db_path=OPERATIONS_DB_PATH)
+    decisions = list_work_order_decisions(limit=1000, db_path=OPERATIONS_DB_PATH)
+    audit_logs = list_audit_logs(limit=1000, db_path=OPERATIONS_DB_PATH)
+    failures = [entry for entry in audit_logs if entry["status"] == "failure"]
+    report_mode = str(ai_context.get("report_generation_mode", "not generated"))
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        metric_card("DB", "OK" if OPERATIONS_DB_PATH.exists() else "Missing", OPERATIONS_DB_PATH.name)
+    with col2:
+        metric_card("Events", str(len(events)), "prediction events")
+    with col3:
+        metric_card("Drafts", str(len(drafts)), "work orders")
+    with col4:
+        metric_card("Decisions", str(len(decisions)), "operator log")
+    with col5:
+        metric_card("Audit Failures", str(len(failures)), "recent log")
+
+    st.markdown("#### 주요 산출물 상태")
+    artifact_rows = []
+    for key, path in REQUIRED_FILES.items():
+        artifact_rows.append(
+            {
+                "artifact": key,
+                "exists": path.exists(),
+                "path": str(path.relative_to(PROJECT_ROOT)),
+                "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
+                if path.exists()
+                else "",
+            }
+        )
+    st.dataframe(pd.DataFrame(artifact_rows), width="stretch", hide_index=True)
+
+    st.markdown("#### GenAI / 보안 상태")
+    key_hits = scan_api_key_patterns()
+    security_rows = [
+        {"check": "report_generation_mode", "status": report_mode},
+        {"check": "API key pattern scan", "status": "PASS" if not key_hits else f"FAIL: {len(key_hits)} hit(s)"},
+        {"check": "operations_db", "status": str(OPERATIONS_DB_PATH)},
+    ]
+    st.dataframe(pd.DataFrame(security_rows), width="stretch", hide_index=True)
+    if key_hits:
+        st.error("API key처럼 보이는 문자열이 발견되었습니다. GitHub push 전에 제거해야 합니다.")
+        st.dataframe(pd.DataFrame(key_hits), width="stretch", hide_index=True)
+
+    st.markdown("#### 최근 감사 로그")
+    if audit_logs:
+        audit_df = pd.DataFrame(audit_logs)
+        display_columns = [
+            "created_at",
+            "actor_id",
+            "role",
+            "action",
+            "status",
+            "target_type",
+            "target_id",
+            "error_message",
+        ]
+        st.dataframe(audit_df[display_columns].head(100), width="stretch", hide_index=True)
+    else:
+        st.info("아직 감사 로그가 없습니다.")
+
+
+def render_user_app() -> None:
+    """Render the product MVP dashboard only."""
+    ensure_required_files(USER_REQUIRED_FILE_KEYS)
+    metrics = load_json(REQUIRED_FILES["metrics"])
+    threshold_summary = load_json(REQUIRED_FILES["threshold"])
+    predictions = load_predictions(REQUIRED_FILES["predictions"])
+    spc_timeseries = load_csv(REQUIRED_FILES["spc_timeseries"])
+    spc_summary = load_json(REQUIRED_FILES["spc_summary"])
+    future_predictions = load_csv(REQUIRED_FILES["future_predictions"])
+    ai_context = load_json(REQUIRED_FILES["ai_report_context"])
+    ai_manager_report = load_markdown(REQUIRED_FILES["ai_manager_report"])
+    genai_settings = render_genai_sidebar_settings()
+
+    tabs = st.tabs(
+        [
+            "시작하기",
+            "성과 요약",
+            "CSV 예측",
+            "SPC 그래프",
+            "GenAI 리포트",
+            "작업지시",
+            "적용 범위",
+        ]
+    )
+    with tabs[0]:
+        render_start_tab(metrics, threshold_summary, predictions, ai_context)
+    with tabs[1]:
+        render_product_summary_tab(metrics, threshold_summary)
+    with tabs[2]:
+        render_field_csv_tab(threshold_summary)
+    with tabs[3]:
+        render_predictive_spc_tab(spc_summary, spc_timeseries)
+    with tabs[4]:
+        render_ai_report_tab(
+            spc_summary,
+            spc_timeseries,
+            future_predictions,
+            ai_context,
+            ai_manager_report,
+            genai_settings,
+        )
+    with tabs[5]:
+        render_work_order_tab(ai_context)
+    with tabs[6]:
+        render_scope_tab()
+
+
+def render_admin_app() -> None:
+    """Render the separated development and verification console."""
+    ensure_required_files(ADMIN_REQUIRED_FILE_KEYS)
+    metrics = load_json(REQUIRED_FILES["metrics"])
+    threshold_summary = load_json(REQUIRED_FILES["threshold"])
+    local_case = load_markdown(REQUIRED_FILES["local_case"])
+    presentation_summary = load_markdown(REQUIRED_FILES["presentation"])
+    research_plan = load_markdown(REQUIRED_FILES["research_plan"])
+    midterm_guide = load_markdown(REQUIRED_FILES["midterm_guide"])
+    midterm_qna = load_markdown(REQUIRED_FILES["midterm_qna"])
+    rehearsal_checklist = load_markdown(REQUIRED_FILES["rehearsal_checklist"])
+    backup_checklist = load_markdown(REQUIRED_FILES["backup_checklist"])
+    final_roadmap = load_markdown(REQUIRED_FILES["final_roadmap"])
+    stage9_applicability = load_markdown(REQUIRED_FILES["stage9_applicability"])
+    stage10_operations = load_markdown(REQUIRED_FILES["stage10_operations"])
+    stage19_20_design = load_markdown(REQUIRED_FILES["stage19_20_design"])
+    predictions = load_predictions(REQUIRED_FILES["predictions"])
+    spc_timeseries = load_csv(REQUIRED_FILES["spc_timeseries"])
+    spc_summary = load_json(REQUIRED_FILES["spc_summary"])
+    future_predictions = load_csv(REQUIRED_FILES["future_predictions"])
+    future_metrics = load_json(REQUIRED_FILES["future_metrics"])
+    ai_context = load_json(REQUIRED_FILES["ai_report_context"])
+    ai_manager_report = load_markdown(REQUIRED_FILES["ai_manager_report"])
+    genai_settings = render_genai_sidebar_settings()
+
+    render_admin_monitoring(ai_context)
+
+    tabs = st.tabs(
+        [
+            "성과 요약",
+            "모델 비교",
+            "Threshold 조정",
+            "SHAP 해석",
+            "Row 시뮬레이션",
+            "실시간 처방 PoC",
+            "Predictive SPC",
+            "AI Report",
+            "현장 CSV MVP",
+            "회사 데이터 재학습 PoC",
+            "개별 사례",
+            "중간발표 진행안",
+            "예상 질문",
+            "발표 요약",
+            "연구계획",
+            "리허설 체크리스트",
+            "당일 백업",
+            "Stage 9 실제 적용성",
+            "Stage 10 운영 요약",
+            "Stage 15~20 로컬 통합",
+            "Stage 19~20 운영 설계",
+            "최종 단계 로드맵",
+        ]
+    )
+
+    with tabs[0]:
+        render_summary_tab(metrics, threshold_summary)
+    with tabs[1]:
+        render_model_tab(metrics)
+    with tabs[2]:
+        render_threshold_tab(threshold_summary)
+    with tabs[3]:
+        render_shap_tab()
+    with tabs[4]:
+        render_row_simulation_tab(predictions, threshold_summary)
+    with tabs[5]:
+        render_realtime_prescription_tab(
+            spc_timeseries,
+            future_predictions,
+            future_metrics,
+            threshold_summary,
+            spc_summary,
+        )
+    with tabs[6]:
+        render_predictive_spc_tab(spc_summary, spc_timeseries)
+    with tabs[7]:
+        render_ai_report_tab(
+            spc_summary,
+            spc_timeseries,
+            future_predictions,
+            ai_context,
+            ai_manager_report,
+            genai_settings,
+        )
+    with tabs[8]:
+        render_field_csv_tab(threshold_summary)
+    with tabs[9]:
+        render_company_retraining_tab()
+    with tabs[10]:
+        render_markdown_tab("개별 고장 예측 사례", local_case)
+    with tabs[11]:
+        render_markdown_tab("중간발표 진행안", midterm_guide)
+    with tabs[12]:
+        render_markdown_tab("중간발표 예상 질문 답변", midterm_qna)
+    with tabs[13]:
+        render_markdown_tab("발표 요약", presentation_summary)
+    with tabs[14]:
+        render_markdown_tab("캡스톤 연구 Stage 보완안", research_plan)
+    with tabs[15]:
+        render_markdown_tab("리허설 체크리스트", rehearsal_checklist)
+    with tabs[16]:
+        render_markdown_tab("발표 당일 백업 체크리스트", backup_checklist)
+    with tabs[17]:
+        render_markdown_tab("Stage 9 실제 적용성 정리", stage9_applicability)
+    with tabs[18]:
+        render_stage10_operations_tab(metrics, threshold_summary, predictions, stage10_operations)
+    with tabs[19]:
+        render_stage15_20_operations_tab(ai_context)
+    with tabs[20]:
+        render_markdown_tab("Stage 19~20 운영 설계", stage19_20_design)
+    with tabs[21]:
+        render_markdown_tab("최종 단계 로드맵", final_roadmap)
+
+
+def main(app_mode: str = "user") -> None:
+    """Run either the product MVP dashboard or the separated admin console."""
+    is_admin = app_mode == "admin"
+    configure_page(
+        page_title=(
+            "AI 예지보전 SPC Admin Console"
+            if is_admin
+            else "AI 예지보전 SPC 대시보드"
+        )
+    )
+    render_header(
+        badge="관리자/검증 콘솔" if is_admin else "제품형 MVP",
+        title=(
+            "AI 예지보전 SPC Admin Console"
+            if is_admin
+            else "AI 예지보전 SPC 대시보드"
+        ),
+        subtitle=(
+            "모델 실험, 검증 산출물, 연구 문서, 로컬 운영 PoC 상태를 별도 콘솔에서 확인합니다."
+            if is_admin
+            else "센서 CSV를 업로드하면 고장 확률, High Risk 판정, SPC 그래프, GenAI 관리자 리포트, 승인형 작업지시 흐름을 확인합니다."
+        ),
+    )
+    actor = require_login("admin" if is_admin else "operator")
+    st.sidebar.success(f"Signed in: {actor['actor_id']} ({actor['role']})")
+    if st.sidebar.button("로그아웃", key=f"{actor['role']}_logout"):
+        record_audit("auth.logout", "success", "session", actor["role"], actor=actor)
+        st.session_state.pop(f"{actor['role']}_authenticated", None)
+        st.session_state.pop("auth_user", None)
+        st.rerun()
+    if is_admin:
+        render_admin_app()
+    else:
+        render_user_app()
 
 
 if __name__ == "__main__":
