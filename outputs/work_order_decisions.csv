@@ -31,3 +31,6 @@ f8b6b63d-3954-42d2-b3ea-ab99618dcef3,d4f6e9f7-b557-4f96-920d-7d251b334a11,dfae5a
 b0506969-87dd-483d-b198-d40045d2cc25,09ae706e-86f9-4e48-9930-e4323da5b093,81a27e8b-68c7-4e9f-b6ed-d036c7937c0f,2026-05-05T11:34:27+00:00,stage20_local_operator,needs_review,Verified during Stage 19~20 local integration smoke test.
 10a81e59-5b72-4074-b612-1cb5e6cc0c90,c254b3b9-ad58-4956-824a-896895f0fcd2,a69cd576-7e43-40ca-ad1f-e4bafa33ccea,2026-05-05T11:34:33+00:00,mqtt_mock_operator,needs_review,Recorded from local mock field bridge.
 bb037c02-5cbd-4d61-a68e-e2ff9dfe7841,acb3fa7b-4154-41ca-9355-578e36a91cf6,8e526c9d-2873-4745-9813-320af558211d,2026-05-05T11:34:33+00:00,mqtt_mock_operator,needs_review,Recorded from local mock field bridge.
+339fdaba-e779-4bb6-b9a7-e20a05803766,4eed28bd-3b32-41ef-ab51-015a50838bed,0648f36b-3bca-433a-95a1-2cb8ba2360d3,2026-05-05T11:53:04+00:00,stage20_local_operator,needs_review,Verified during Stage 19~20 local integration smoke test.
+034a82d4-2ea6-4068-bf39-3fe29cc23b17,253f2fd5-d46f-4f58-8eca-b4364f236047,8c91572e-c073-484a-8071-1e951dfd60f3,2026-05-05T11:53:11+00:00,mqtt_mock_operator,needs_review,Recorded from local mock field bridge.
+6294b45f-d9a7-4c2a-a2b1-a5dcfbf20a93,32324d05-c80b-457c-9833-26c568d5e0d4,de05ee77-00b6-4e5c-9d3d-7cec53bde1aa,2026-05-05T11:53:11+00:00,mqtt_mock_operator,needs_review,Recorded from local mock field bridge.

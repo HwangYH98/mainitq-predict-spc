@@ -74,12 +74,15 @@ try {
 
     Invoke-Stage "[6/13] Stage 14 company CSV retraining PoC..." @("src\verify_company_generalization.py")
     Invoke-Stage "[7/13] Stage 15~18 local operations PoC..." @("src\verify_stage15_20.py")
-    Invoke-Stage "[8/13] Stage 19~20 local field-event and decision integration..." @("src\verify_stage19_20_integration.py")
-    Invoke-Stage "[9/13] SMOTE and threshold model strategy comparison..." @("src\compare_model_strategies.py")
-    Invoke-Stage "[10/13] SPC-only vs ML+SPC alert comparison..." @("src\compare_spc_ml_alerts.py")
-    Invoke-Stage "[11/13] MQTT local mock field bridge..." @("src\mock_field_bridge.py", "--protocol", "mqtt_mock", "--rows", "2", "--create-drafts", "--decision", "needs_review")
-    Invoke-Stage "[12/13] Regenerating presentation and roadmap documents..." @("src\create_presentation_summary.py")
-    Invoke-Stage "[13/13] Full Stage 1~20 project verification..." @("src\verify_project.py")
+    Invoke-Stage "[8/16] Stage 19~20 local field-event and decision integration..." @("src\verify_stage19_20_integration.py")
+    Invoke-Stage "[9/16] SMOTE and threshold model strategy comparison..." @("src\compare_model_strategies.py")
+    Invoke-Stage "[10/16] SPC-only vs ML+SPC alert comparison..." @("src\compare_spc_ml_alerts.py")
+    Invoke-Stage "[11/16] Operational value simulation..." @("src\evaluate_operational_value.py")
+    Invoke-Stage "[12/16] MQTT local mock field bridge..." @("src\mock_field_bridge.py", "--protocol", "mqtt_mock", "--rows", "2", "--create-drafts", "--decision", "needs_review")
+    Invoke-Stage "[13/16] Workflow traceability evaluation..." @("src\evaluate_workflow_traceability.py")
+    Invoke-Stage "[14/16] Product comparison and thesis evidence pack..." @("src\create_product_comparison_summary.py")
+    Invoke-Stage "[15/16] Regenerating presentation and roadmap documents..." @("src\create_presentation_summary.py")
+    Invoke-Stage "[16/16] Full Stage 1~20 project verification..." @("src\verify_project.py")
 
     Write-Host ""
     Write-Host "Stage 1~20 local integration PoC passed with required Gemini report." -ForegroundColor Green

@@ -82,6 +82,14 @@ OPTIONAL_FILES = {
     "spc_vs_ml_summary": OUTPUT_DIR / "spc_vs_ml_summary.md",
     "spc_vs_ml_comparison": OUTPUT_DIR / "spc_vs_ml_comparison.csv",
     "mock_bridge_summary": OUTPUT_DIR / "mock_field_bridge_summary.md",
+    "operational_value_summary": OUTPUT_DIR / "operational_value_simulation.md",
+    "operational_value_comparison": OUTPUT_DIR / "operational_value_simulation.csv",
+    "operational_value_chart": OUTPUT_DIR / "operational_value_simulation.png",
+    "product_capability_summary": OUTPUT_DIR / "product_capability_comparison.md",
+    "product_capability_comparison": OUTPUT_DIR / "product_capability_comparison.csv",
+    "workflow_traceability_summary": OUTPUT_DIR / "workflow_traceability_summary.md",
+    "workflow_traceability_comparison": OUTPUT_DIR / "workflow_traceability_summary.csv",
+    "thesis_evidence_pack": OUTPUT_DIR / "thesis_evidence_pack.md",
 }
 
 RAW_UPLOAD_COLUMNS = [
@@ -2520,6 +2528,77 @@ def render_comparison_evidence() -> None:
             st.markdown(spc_summary)
 
 
+def render_thesis_evidence_tab() -> None:
+    """Show thesis evidence artifacts only in the admin console."""
+    st.subheader("논문 검증 근거")
+    st.caption(
+        "상용 제품보다 우월하다는 주장이 아니라, 동일 데이터셋 비교와 제품 workflow 통합성을 방어 가능하게 정리합니다."
+    )
+
+    render_comparison_evidence()
+
+    st.markdown("#### 운영 가치 시뮬레이션")
+    if OPTIONAL_FILES["operational_value_comparison"].exists():
+        value_df = pd.read_csv(OPTIONAL_FILES["operational_value_comparison"])
+        display_columns = [
+            "scenario_id",
+            "display_name",
+            "precision",
+            "recall",
+            "f1_score",
+            "alert_count",
+            "false_alarm_count",
+            "missed_failure_count",
+            "normalized_operating_cost",
+        ]
+        st.dataframe(value_df[display_columns], width="stretch", hide_index=True)
+    else:
+        st.info("`src\\evaluate_operational_value.py` 실행 후 운영 가치 시뮬레이션이 표시됩니다.")
+    if OPTIONAL_FILES["operational_value_chart"].exists():
+        st.image(
+            str(OPTIONAL_FILES["operational_value_chart"]),
+            caption="Normalized operating cost simulation",
+            width="stretch",
+        )
+    value_summary = load_optional_markdown(OPTIONAL_FILES["operational_value_summary"])
+    if value_summary:
+        with st.expander("운영 가치 시뮬레이션 요약"):
+            st.markdown(value_summary)
+
+    st.markdown("#### 제품 기능 중심 비교")
+    if OPTIONAL_FILES["product_capability_comparison"].exists():
+        product_df = pd.read_csv(OPTIONAL_FILES["product_capability_comparison"])
+        display_columns = [
+            "system",
+            "category",
+            "sensor_input",
+            "spc_integration",
+            "explainability",
+            "work_order_workflow",
+            "deployment_level",
+            "research_reproducibility",
+        ]
+        st.dataframe(product_df[display_columns], width="stretch", hide_index=True)
+    product_summary = load_optional_markdown(OPTIONAL_FILES["product_capability_summary"])
+    if product_summary:
+        with st.expander("제품 기능 비교 요약"):
+            st.markdown(product_summary)
+
+    st.markdown("#### Workflow traceability")
+    if OPTIONAL_FILES["workflow_traceability_comparison"].exists():
+        trace_df = pd.read_csv(OPTIONAL_FILES["workflow_traceability_comparison"])
+        st.dataframe(trace_df, width="stretch", hide_index=True)
+    trace_summary = load_optional_markdown(OPTIONAL_FILES["workflow_traceability_summary"])
+    if trace_summary:
+        with st.expander("승인형 작업지시 traceability 요약"):
+            st.markdown(trace_summary)
+
+    evidence_pack = load_optional_markdown(OPTIONAL_FILES["thesis_evidence_pack"])
+    if evidence_pack:
+        st.markdown("#### Thesis evidence pack")
+        st.markdown(evidence_pack)
+
+
 def render_final_demo_tab(
     metrics: dict,
     threshold_summary: dict,
@@ -2806,6 +2885,7 @@ def main() -> None:
             "Stage 15~20 로컬 통합",
             "Stage 19~20 운영 설계",
             "최종 단계 로드맵",
+            "논문 검증 근거",
         ]
     )
 
@@ -2866,6 +2946,8 @@ def main() -> None:
         render_markdown_tab("Stage 19~20 운영 설계", stage19_20_design)
     with tabs[21]:
         render_markdown_tab("최종 단계 로드맵", final_roadmap)
+    with tabs[22]:
+        render_thesis_evidence_tab()
 
 
 USER_REQUIRED_FILE_KEYS = (
@@ -3003,11 +3085,36 @@ def render_scope_tab() -> None:
         - 실제 PLC/SCADA 운영망 연결 완료
         - 실제 공장 센서 스트림 운영 배포
         - 무인 자동 정비 명령 실행
-        - 다중 사용자 로그인/권한, 운영 DB, 감사 로그, 모니터링 체계
+        - 상용 SaaS 수준의 SSO/RBAC, 외부 운영 DB, 보안 감사, 장애 대응 체계
         - 현장 회사 데이터 기반 성능 실증 수치
         """
     )
-    render_comparison_evidence()
+    st.markdown("#### 논문에서 가능한 주장")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "구분": "가능",
+                    "표현": "동일 AI4I split에서 모델, SMOTE, threshold, SPC alert 정책을 비교했다.",
+                },
+                {
+                    "구분": "가능",
+                    "표현": "SHAP/GenAI 설명과 승인형 작업지시 workflow를 하나의 제품형 MVP로 연결했다.",
+                },
+                {
+                    "구분": "가능",
+                    "표현": "false alarm과 missed failure에 가중치를 둔 normalized cost simulation을 수행했다.",
+                },
+                {
+                    "구분": "금지",
+                    "표현": "실제 공장에서 비용 절감, 시간 단축, 자동 정비 명령 실행이 검증됐다고 말하지 않는다.",
+                },
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+    st.info("세부 비교표와 논문 evidence pack은 사용자 앱이 아니라 Admin 콘솔의 `논문 검증 근거` 탭에서 확인합니다.")
 
 
 def render_work_order_tab(ai_context: dict) -> None:
@@ -3309,6 +3416,7 @@ def render_admin_app() -> None:
             "Stage 15~20 로컬 통합",
             "Stage 19~20 운영 설계",
             "최종 단계 로드맵",
+            "논문 검증 근거",
         ]
     )
 
@@ -3369,6 +3477,8 @@ def render_admin_app() -> None:
         render_markdown_tab("Stage 19~20 운영 설계", stage19_20_design)
     with tabs[21]:
         render_markdown_tab("최종 단계 로드맵", final_roadmap)
+    with tabs[22]:
+        render_thesis_evidence_tab()
 
 
 def main(app_mode: str = "user") -> None:

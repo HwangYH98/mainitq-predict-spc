@@ -192,13 +192,16 @@ http://127.0.0.1:8000/docs
 
 `/work-order-decision`은 `approve`, `reject`, `needs_review` 중 하나를 기록합니다. 자동 정비 명령을 실행하지 않고, 사람이 승인하는 작업지시 workflow만 저장합니다.
 
-## 비교 실험
+## 논문 검증 근거 생성
 
-모델 전략과 alert 전략을 비교하려면 아래 명령을 실행합니다.
+모델 전략, alert 전략, 운영 가치 시뮬레이션, 제품 기능 비교, workflow traceability를 생성하려면 아래 명령을 실행합니다.
 
 ```powershell
 .\.venv\Scripts\python.exe src\compare_model_strategies.py
 .\.venv\Scripts\python.exe src\compare_spc_ml_alerts.py
+.\.venv\Scripts\python.exe src\evaluate_operational_value.py
+.\.venv\Scripts\python.exe src\evaluate_workflow_traceability.py
+.\.venv\Scripts\python.exe src\create_product_comparison_summary.py
 ```
 
 주요 산출물:
@@ -208,8 +211,17 @@ http://127.0.0.1:8000/docs
 - `outputs/model_strategy_pr_curve.png`
 - `outputs/spc_vs_ml_comparison.csv`
 - `outputs/spc_vs_ml_summary.md`
+- `outputs/operational_value_simulation.csv`
+- `outputs/operational_value_simulation.png`
+- `outputs/product_capability_comparison.md`
+- `outputs/workflow_traceability_summary.md`
+- `outputs/thesis_evidence_pack.md`
 
 비교 결과는 SMOTE나 특정 threshold가 항상 좋다는 주장을 강제하지 않습니다. precision, recall, F1-score, PR-AUC, alert count, false alarm count의 trade-off를 확인하기 위한 근거입니다.
+
+운영 가치 시뮬레이션은 실제 원화 비용 절감 실증이 아니라 false alarm, missed failure, planned action에 상대 가중치를 둔 normalized cost simulation입니다. 논문에서는 `85% 시간 단축`, `30% 비용 절감`, `실제 공장 ROI 검증`처럼 쓰지 않습니다.
+
+상용 제품 비교는 IBM Maximo, AWS IoT SiteWise, Azure IoT Operations, Siemens Insights Hub를 기능적 참조 시스템으로 둡니다. 본 시스템이 상용 플랫폼보다 전체적으로 우월하다고 주장하지 않고, 연구 재현성, ML+SPC 비교, SHAP/GenAI 설명, 승인형 작업지시 workflow 연결성을 차별점으로 설명합니다.
 
 ## 검증
 

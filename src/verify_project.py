@@ -99,6 +99,16 @@ REQUIRED_COMPARISON_OUTPUTS = [
     "spc_vs_ml_summary.md",
     "mock_field_bridge_summary.json",
     "mock_field_bridge_summary.md",
+    "operational_value_simulation.csv",
+    "operational_value_simulation.json",
+    "operational_value_simulation.png",
+    "operational_value_simulation.md",
+    "product_capability_comparison.csv",
+    "product_capability_comparison.md",
+    "workflow_traceability_summary.csv",
+    "workflow_traceability_summary.json",
+    "workflow_traceability_summary.md",
+    "thesis_evidence_pack.md",
 ]
 
 EXPECTED_MODEL_STRATEGIES = {
@@ -114,6 +124,37 @@ EXPECTED_ALERT_STRATEGIES = {
     "spc_only_torque_control_limit",
     "ml_selected_threshold",
     "ml_spc_combined",
+}
+
+EXPECTED_OPERATIONAL_POLICIES = {
+    "no_alert_baseline",
+    "spc_only",
+    "xgboost_default",
+    "xgboost_tuned_threshold",
+    "ml_spc_combined",
+}
+
+EXPECTED_COST_SCENARIOS = {"conservative", "balanced", "high_downtime"}
+
+EXPECTED_PRODUCT_SYSTEMS = {
+    "IBM Maximo",
+    "AWS IoT SiteWise",
+    "Azure IoT Operations",
+    "Siemens Insights Hub",
+    "This system",
+}
+
+EXPECTED_WORKFLOW_METRICS = {
+    "event_count",
+    "draft_count",
+    "decision_count",
+    "event_to_draft_rate",
+    "event_to_decision_rate",
+    "draft_to_decision_rate",
+    "operator_record_rate",
+    "needs_review_retraining_candidates",
+    "audit_log_count",
+    "audit_failure_count",
 }
 
 REQUIRED_PREDICTION_COLUMNS = [
@@ -609,9 +650,81 @@ def verify_comparison_outputs() -> None:
     if int(mock_summary.get("event_count", 0)) <= 0:
         fail("mock_field_bridge_summary.json should contain at least one event.")
 
+    operational = pd.read_csv(OUTPUT_DIR / "operational_value_simulation.csv")
+    required_operational_columns = [
+        "scenario_id",
+        "policy_id",
+        "precision",
+        "recall",
+        "f1_score",
+        "alert_count",
+        "false_alarm_count",
+        "missed_failure_count",
+        "operating_cost_units",
+        "normalized_operating_cost",
+    ]
+    missing_operational_columns = [
+        column for column in required_operational_columns if column not in operational.columns
+    ]
+    if missing_operational_columns:
+        fail(f"operational_value_simulation.csv is missing columns: {missing_operational_columns}")
+    if EXPECTED_OPERATIONAL_POLICIES - set(operational["policy_id"].astype(str)):
+        fail("operational_value_simulation.csv is missing one or more required alert policies.")
+    if EXPECTED_COST_SCENARIOS - set(operational["scenario_id"].astype(str)):
+        fail("operational_value_simulation.csv is missing one or more cost scenarios.")
+    if operational["normalized_operating_cost"].isna().any():
+        fail("operational_value_simulation.csv contains missing normalized costs.")
+    operational_summary = (OUTPUT_DIR / "operational_value_simulation.md").read_text(encoding="utf-8")
+    if "not a real factory cost-reduction proof" not in operational_summary:
+        fail("operational_value_simulation.md is missing the factory-cost guardrail.")
+
+    product_comparison = pd.read_csv(OUTPUT_DIR / "product_capability_comparison.csv")
+    required_product_columns = [
+        "system",
+        "sensor_input",
+        "model_reproducibility",
+        "spc_integration",
+        "explainability",
+        "work_order_workflow",
+        "deployment_level",
+        "research_reproducibility",
+    ]
+    missing_product_columns = [
+        column for column in required_product_columns if column not in product_comparison.columns
+    ]
+    if missing_product_columns:
+        fail(f"product_capability_comparison.csv is missing columns: {missing_product_columns}")
+    if EXPECTED_PRODUCT_SYSTEMS - set(product_comparison["system"].astype(str)):
+        fail("product_capability_comparison.csv is missing one or more commercial reference systems.")
+    product_summary = (OUTPUT_DIR / "product_capability_comparison.md").read_text(encoding="utf-8")
+    if "not a claim that this system outperforms commercial SaaS products" not in product_summary:
+        fail("product_capability_comparison.md is missing the commercial-product guardrail.")
+
+    workflow_summary = pd.read_csv(OUTPUT_DIR / "workflow_traceability_summary.csv")
+    if EXPECTED_WORKFLOW_METRICS - set(workflow_summary["metric"].astype(str)):
+        fail("workflow_traceability_summary.csv is missing one or more required traceability metrics.")
+    workflow_markdown = (OUTPUT_DIR / "workflow_traceability_summary.md").read_text(encoding="utf-8")
+    if "not automatic maintenance-command execution" not in workflow_markdown:
+        fail("workflow_traceability_summary.md is missing the automatic-maintenance guardrail.")
+
+    evidence_pack = (OUTPUT_DIR / "thesis_evidence_pack.md").read_text(encoding="utf-8")
+    required_evidence_phrases = [
+        "Do Not Claim",
+        "85% detection-time reduction",
+        "30% cost reduction",
+        "validated factory ROI",
+        "Commercial Reference Systems",
+    ]
+    missing_evidence_phrases = [
+        phrase for phrase in required_evidence_phrases if phrase not in evidence_pack
+    ]
+    if missing_evidence_phrases:
+        fail(f"thesis_evidence_pack.md is missing guardrail phrases: {missing_evidence_phrases}")
+
     pass_step(
         "Comparison and mock-bridge outputs passed "
-        f"({len(model_comparison)} model rows, {len(spc_comparison)} alert rows)."
+        f"({len(model_comparison)} model rows, {len(spc_comparison)} alert rows, "
+        f"{len(operational)} operating-value rows)."
     )
 
 
@@ -637,6 +750,10 @@ def verify_utf8_documents() -> None:
         OUTPUT_DIR / "model_strategy_summary.md",
         OUTPUT_DIR / "spc_vs_ml_summary.md",
         OUTPUT_DIR / "mock_field_bridge_summary.md",
+        OUTPUT_DIR / "operational_value_simulation.md",
+        OUTPUT_DIR / "product_capability_comparison.md",
+        OUTPUT_DIR / "workflow_traceability_summary.md",
+        OUTPUT_DIR / "thesis_evidence_pack.md",
     ]
 
     for path in documents:
