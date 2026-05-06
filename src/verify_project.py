@@ -109,6 +109,16 @@ REQUIRED_COMPARISON_OUTPUTS = [
     "workflow_traceability_summary.json",
     "workflow_traceability_summary.md",
     "thesis_evidence_pack.md",
+    "company_input_quality_report.csv",
+    "company_input_quality_report.json",
+    "company_preprocessing_report.md",
+    "probability_calibration_metrics.json",
+    "probability_calibration_curve.png",
+    "prediction_confidence_report.md",
+    "operating_policy_thresholds.json",
+    "company_prediction_results.csv",
+    "company_risk_priority_queue.csv",
+    "operating_policy_simulation.md",
 ]
 
 EXPECTED_MODEL_STRATEGIES = {
@@ -156,6 +166,8 @@ EXPECTED_WORKFLOW_METRICS = {
     "audit_log_count",
     "audit_failure_count",
 }
+
+EXPECTED_OPERATING_POLICIES_FOR_ENGINE = {"precision_first", "balanced", "recall_first"}
 
 REQUIRED_PREDICTION_COLUMNS = [
     "UDI",
@@ -734,6 +746,75 @@ def verify_stage19_20_design_outputs() -> None:
     verify_stage19_20_design(OUTPUT_DIR / "stage19_20_operations_design.md")
 
 
+def verify_smart_preprocessing_prediction_outputs() -> None:
+    quality = pd.read_csv(OUTPUT_DIR / "company_input_quality_report.csv")
+    required_quality_columns = [
+        "canonical_column",
+        "source_column",
+        "issue",
+        "severity",
+        "affected_rows",
+        "detail",
+    ]
+    missing_quality_columns = [
+        column for column in required_quality_columns if column not in quality.columns
+    ]
+    if missing_quality_columns:
+        fail(f"company_input_quality_report.csv is missing columns: {missing_quality_columns}")
+
+    predictions = pd.read_csv(OUTPUT_DIR / "company_prediction_results.csv")
+    required_prediction_columns = [
+        "raw_probability",
+        "calibrated_probability",
+        "risk_status",
+        "risk_priority_score",
+        "recommendation",
+    ]
+    missing_prediction_columns = [
+        column for column in required_prediction_columns if column not in predictions.columns
+    ]
+    if missing_prediction_columns:
+        fail(f"company_prediction_results.csv is missing columns: {missing_prediction_columns}")
+    if predictions["calibrated_probability"].isna().any():
+        fail("company_prediction_results.csv contains missing calibrated probabilities.")
+
+    priority = pd.read_csv(OUTPUT_DIR / "company_risk_priority_queue.csv")
+    if "priority_rank" not in priority.columns or "risk_priority_score" not in priority.columns:
+        fail("company_risk_priority_queue.csv is missing priority columns.")
+    if len(priority) != len(predictions):
+        fail("company_risk_priority_queue.csv row count should match prediction results.")
+
+    calibration = json.loads((OUTPUT_DIR / "probability_calibration_metrics.json").read_text(encoding="utf-8"))
+    if calibration.get("selected_method") not in {"raw", "sigmoid", "isotonic"}:
+        fail("probability_calibration_metrics.json has an invalid selected_method.")
+    if "brier_scores" not in calibration:
+        fail("probability_calibration_metrics.json is missing brier_scores.")
+
+    policy = json.loads((OUTPUT_DIR / "operating_policy_thresholds.json").read_text(encoding="utf-8"))
+    missing_policies = EXPECTED_OPERATING_POLICIES_FOR_ENGINE - set(policy.get("policies", {}).keys())
+    if missing_policies:
+        fail(f"operating_policy_thresholds.json is missing policies: {sorted(missing_policies)}")
+
+    report_text = (
+        (OUTPUT_DIR / "company_preprocessing_report.md").read_text(encoding="utf-8")
+        + (OUTPUT_DIR / "prediction_confidence_report.md").read_text(encoding="utf-8")
+        + (OUTPUT_DIR / "operating_policy_simulation.md").read_text(encoding="utf-8")
+    )
+    required_phrases = [
+        "does not prove real company-data model performance",
+        "not a field-certified reliability score",
+        "not factory-approved operating policies",
+    ]
+    missing_phrases = [phrase for phrase in required_phrases if phrase not in report_text]
+    if missing_phrases:
+        fail(f"Smart preprocessing reports are missing guardrail phrases: {missing_phrases}")
+
+    pass_step(
+        "Smart preprocessing/prediction outputs passed "
+        f"({len(predictions)} prediction rows, calibration {calibration['selected_method']})."
+    )
+
+
 def verify_utf8_documents() -> None:
     documents = [
         PROJECT_ROOT / "README.md",
@@ -754,6 +835,9 @@ def verify_utf8_documents() -> None:
         OUTPUT_DIR / "product_capability_comparison.md",
         OUTPUT_DIR / "workflow_traceability_summary.md",
         OUTPUT_DIR / "thesis_evidence_pack.md",
+        OUTPUT_DIR / "company_preprocessing_report.md",
+        OUTPUT_DIR / "prediction_confidence_report.md",
+        OUTPUT_DIR / "operating_policy_simulation.md",
     ]
 
     for path in documents:
@@ -779,6 +863,7 @@ def main() -> None:
     verify_stage14_company_outputs()
     verify_stage15_18_outputs()
     verify_comparison_outputs()
+    verify_smart_preprocessing_prediction_outputs()
     verify_stage19_20_design_outputs()
     verify_utf8_documents()
     print("All project verification checks passed.")

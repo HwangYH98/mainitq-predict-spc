@@ -119,7 +119,7 @@ Admin 콘솔 상단의 운영 모니터링 영역에서는 DB 상태, 최근 eve
 
 ## CSV 입력 형식
 
-사용자 앱의 `CSV 예측` 탭에서 샘플 CSV를 다운로드할 수 있습니다. 업로드 CSV는 아래 컬럼을 포함해야 합니다.
+사용자 앱의 `CSV 예측` 탭은 Smart CSV Wizard로 동작합니다. AI4I형 컬럼을 그대로 넣어도 되고, 회사별 컬럼명이 다른 CSV를 넣어도 자동 매핑 후보를 먼저 보여줍니다.
 
 ```csv
 Type,Air temperature [K],Process temperature [K],Rotational speed [rpm],Torque [Nm],Tool wear [min]
@@ -128,16 +128,29 @@ M,298.2,308.7,1408,46.3,3
 H,299.4,309.2,1320,58.2,120
 ```
 
+회사형 예시:
+
+```csv
+product_grade,air_temp_c,process_temp_c,rpm,motor_torque_nm,wear_minutes
+L,25.0,35.4,1551,42.8,0
+M,26.1,36.6,1408,46.3,3
+H,30.2,39.8,1320,58.2,120
+```
+
 처리 흐름:
 
 ```text
 CSV 업로드
-→ 컬럼명, Type 값, 숫자 형식 검증
+→ 컬럼 자동 매핑 확인/수정
+→ Celsius/Kelvin 등 단위 변환
+→ 결측값, 숫자 변환 실패, 이상 범위, 중복 row 품질 진단
 → AI4I 기준 전처리 및 one-hot feature 정렬
-→ XGBoost predict_proba
-→ threshold 기준 High Risk 판정
-→ 확률 그래프, 예측표, 위험요인, CSV 다운로드 제공
+→ XGBoost raw probability와 calibrated probability 계산
+→ 운영 정책별 threshold 기준 High Risk 판정
+→ 위험 우선순위, 추천 조치, 예측 결과 CSV 제공
 ```
+
+라벨 없는 회사 CSV는 예측과 품질 진단만 제공합니다. 실제 회사 데이터 성능 검증 완료라고 주장하려면 고장/정상 라벨이 포함된 CSV로 별도 재학습/평가를 수행해야 합니다.
 
 ## GenAI API key
 
@@ -200,6 +213,7 @@ http://127.0.0.1:8000/docs
 .\.venv\Scripts\python.exe src\compare_model_strategies.py
 .\.venv\Scripts\python.exe src\compare_spc_ml_alerts.py
 .\.venv\Scripts\python.exe src\evaluate_operational_value.py
+.\.venv\Scripts\python.exe src\verify_preprocessing_prediction_engine.py
 .\.venv\Scripts\python.exe src\evaluate_workflow_traceability.py
 .\.venv\Scripts\python.exe src\create_product_comparison_summary.py
 ```
@@ -216,6 +230,12 @@ http://127.0.0.1:8000/docs
 - `outputs/product_capability_comparison.md`
 - `outputs/workflow_traceability_summary.md`
 - `outputs/thesis_evidence_pack.md`
+- `outputs/company_input_quality_report.csv`
+- `outputs/company_prediction_results.csv`
+- `outputs/company_risk_priority_queue.csv`
+- `outputs/probability_calibration_metrics.json`
+- `outputs/probability_calibration_curve.png`
+- `outputs/operating_policy_thresholds.json`
 
 비교 결과는 SMOTE나 특정 threshold가 항상 좋다는 주장을 강제하지 않습니다. precision, recall, F1-score, PR-AUC, alert count, false alarm count의 trade-off를 확인하기 위한 근거입니다.
 

@@ -2,11 +2,12 @@
   "scope": "human-approved work-order traceability; not automatic maintenance execution",
   "database_path": "C:\\Users\\hoon9\\Documents\\capstone design\\outputs\\operations.db",
   "decision_breakdown": {
-    "needs_review": 31,
+    "needs_review": 34,
     "approve": 6
   },
   "audit_action_breakdown": {
-    "auth.login": 17,
+    "smart_csv.predict": 1,
+    "auth.login": 23,
     "work_order_decision.create": 1,
     "work_order_draft.create": 1,
     "field_event.create": 1,
@@ -15,32 +16,32 @@
   "metrics": [
     {
       "metric": "event_count",
-      "value": 80.0,
+      "value": 86.0,
       "description": "Prediction events stored in SQLite."
     },
     {
       "metric": "draft_count",
-      "value": 51.0,
+      "value": 55.0,
       "description": "Human-approved work-order drafts generated from events."
     },
     {
       "metric": "decision_count",
-      "value": 37.0,
+      "value": 40.0,
       "description": "Operator approve/reject/needs_review decisions."
     },
     {
       "metric": "event_to_draft_rate",
-      "value": 0.6375,
+      "value": 0.6395,
       "description": "Share of stored events that have at least one draft."
     },
     {
       "metric": "event_to_decision_rate",
-      "value": 0.4625,
+      "value": 0.4651,
       "description": "Share of stored events that reached an operator decision."
     },
     {
       "metric": "draft_to_decision_rate",
-      "value": 0.7255,
+      "value": 0.7273,
       "description": "Share of drafts that received a decision."
     },
     {
@@ -50,12 +51,12 @@
     },
     {
       "metric": "needs_review_retraining_candidates",
-      "value": 31.0,
+      "value": 34.0,
       "description": "Decisions marked as needs_review and therefore retraining candidates."
     },
     {
       "metric": "audit_log_count",
-      "value": 21.0,
+      "value": 28.0,
       "description": "Append-only product MVP audit log rows."
     },
     {

@@ -1,0 +1,2 @@
+﻿canonical_column,source_column,issue,severity,affected_rows,detail
+all,,no_blocking_issue,info,0,No blocking data-quality issue was found.

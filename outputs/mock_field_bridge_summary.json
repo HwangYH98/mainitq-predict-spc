@@ -6,14 +6,14 @@
   "decision_count": 2,
   "events": [
     {
-      "event_id": "8c91572e-c073-484a-8071-1e951dfd60f3",
+      "event_id": "f76dd16d-1457-456b-a461-8a74af01917a",
       "source": "field_event:mqtt_mock:mock-press-01",
       "probability": 0.966716,
       "risk_status": "High Risk",
       "equipment_id": "mock-press-01"
     },
     {
-      "event_id": "de05ee77-00b6-4e5c-9d3d-7cec53bde1aa",
+      "event_id": "dc563ab6-ec60-4332-ae9c-625e42b49c46",
       "source": "field_event:mqtt_mock:mock-press-02",
       "probability": 0.929375,
       "risk_status": "High Risk",
@@ -21,12 +21,12 @@
     }
   ],
   "draft_ids": [
-    "253f2fd5-d46f-4f58-8eca-b4364f236047",
-    "32324d05-c80b-457c-9833-26c568d5e0d4"
+    "fc833a2c-63df-4fcc-9ebb-9091853b4518",
+    "c724e9a6-4486-4ddb-b460-3c3aa43041ad"
   ],
   "decision_ids": [
-    "034a82d4-2ea6-4068-bf39-3fe29cc23b17",
-    "6294b45f-d9a7-4c2a-a2b1-a5dcfbf20a93"
+    "7a01a363-49a1-4f1c-8d34-0fef0cd9455c",
+    "1fbe784f-86bb-467a-a7a3-e1d06ec63eea"
   ],
   "decisions_csv": "C:\\Users\\hoon9\\Documents\\capstone design\\outputs\\work_order_decisions.csv"
 }

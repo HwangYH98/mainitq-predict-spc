@@ -114,6 +114,21 @@ EVIDENCE_FILES = [
         "path": "outputs/workflow_traceability_summary.md",
         "paper_use": "Event-draft-decision traceability evidence",
     },
+    {
+        "artifact": "Company CSV preprocessing report",
+        "path": "outputs/company_preprocessing_report.md",
+        "paper_use": "Column mapping, unit conversion, and data-quality diagnosis evidence",
+    },
+    {
+        "artifact": "Probability calibration metrics",
+        "path": "outputs/probability_calibration_metrics.json",
+        "paper_use": "Raw vs calibrated failure-probability reliability evidence",
+    },
+    {
+        "artifact": "Risk priority queue",
+        "path": "outputs/company_risk_priority_queue.csv",
+        "paper_use": "Risk-prioritized operator workflow evidence",
+    },
 ]
 
 

@@ -24,6 +24,9 @@ The system implements a reproducible product MVP that connects AI4I failure pred
 | Operational value simulation | `outputs/operational_value_simulation.csv` | False-alarm/missed-failure normalized cost simulation | True |
 | Product capability comparison | `outputs/product_capability_comparison.md` | Feature-level comparison with commercial reference systems | True |
 | Workflow traceability summary | `outputs/workflow_traceability_summary.md` | Event-draft-decision traceability evidence | True |
+| Company CSV preprocessing report | `outputs/company_preprocessing_report.md` | Column mapping, unit conversion, and data-quality diagnosis evidence | True |
+| Probability calibration metrics | `outputs/probability_calibration_metrics.json` | Raw vs calibrated failure-probability reliability evidence | True |
+| Risk priority queue | `outputs/company_risk_priority_queue.csv` | Risk-prioritized operator workflow evidence | True |
 
 ## Commercial Reference Systems
 

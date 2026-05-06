@@ -37,6 +37,14 @@ from operations_store import (
     list_work_order_drafts,
 )
 from predictive_spc import genai_ai_report
+from preprocessing_prediction_engine import (
+    CANONICAL_SENSOR_COLUMNS,
+    NUMERIC_SENSOR_COLUMNS,
+    UNIT_OPTIONS,
+    infer_column_mapping,
+    predict_company_sensor_csv,
+    sample_company_alias_dataframe,
+)
 from realtime_ops import (
     create_work_order_decision,
     create_work_order_draft,
@@ -90,6 +98,15 @@ OPTIONAL_FILES = {
     "workflow_traceability_summary": OUTPUT_DIR / "workflow_traceability_summary.md",
     "workflow_traceability_comparison": OUTPUT_DIR / "workflow_traceability_summary.csv",
     "thesis_evidence_pack": OUTPUT_DIR / "thesis_evidence_pack.md",
+    "company_input_quality_report": OUTPUT_DIR / "company_input_quality_report.csv",
+    "company_preprocessing_report": OUTPUT_DIR / "company_preprocessing_report.md",
+    "probability_calibration_metrics": OUTPUT_DIR / "probability_calibration_metrics.json",
+    "probability_calibration_curve": OUTPUT_DIR / "probability_calibration_curve.png",
+    "prediction_confidence_report": OUTPUT_DIR / "prediction_confidence_report.md",
+    "operating_policy_thresholds": OUTPUT_DIR / "operating_policy_thresholds.json",
+    "company_prediction_results": OUTPUT_DIR / "company_prediction_results.csv",
+    "company_risk_priority_queue": OUTPUT_DIR / "company_risk_priority_queue.csv",
+    "operating_policy_simulation": OUTPUT_DIR / "operating_policy_simulation.md",
 }
 
 RAW_UPLOAD_COLUMNS = [
@@ -1418,6 +1435,253 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     st.markdown(prescription_draft(result_df.iloc[selected_position], factors, selected_threshold))
 
 
+def render_field_csv_tab(threshold_summary: dict) -> None:
+    """Render a company CSV wizard with mapping, quality, calibrated prediction, and priority."""
+    st.subheader("CSV 예측")
+    st.caption(
+        "회사별 CSV를 업로드하면 컬럼 자동 매핑, 단위 변환, 품질 진단, 보정 확률, 위험 우선순위를 한 흐름으로 확인합니다."
+    )
+
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"단계": 1, "이름": "CSV 업로드", "출력": "원본 미리보기와 샘플 다운로드"},
+                {"단계": 2, "이름": "컬럼 자동 매핑 확인", "출력": "회사 컬럼을 AI4I 기준 센서 컬럼으로 연결"},
+                {"단계": 3, "이름": "데이터 품질 리포트", "출력": "결측값, 숫자 변환 실패, 이상 범위, 중복 row"},
+                {"단계": 4, "이름": "예측/확률 그래프", "출력": "raw probability와 calibrated probability"},
+                {"단계": 5, "이름": "위험 우선순위와 작업지시", "출력": "risk priority score와 추천 조치"},
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("#### AI4I형 샘플")
+        ai4i_sample = sample_field_dataframe()
+        st.dataframe(ai4i_sample, width="stretch", hide_index=True)
+        st.download_button(
+            "AI4I형 샘플 CSV 다운로드",
+            data=csv_download_bytes(ai4i_sample),
+            file_name="sample_ai4i_sensor_rows.csv",
+            mime="text/csv",
+        )
+    with col2:
+        st.markdown("#### 회사형 샘플")
+        company_sample = sample_company_alias_dataframe()
+        st.dataframe(company_sample, width="stretch", hide_index=True)
+        st.download_button(
+            "회사형 샘플 CSV 다운로드",
+            data=csv_download_bytes(company_sample),
+            file_name="sample_company_sensor_rows.csv",
+            mime="text/csv",
+        )
+
+    uploaded_file = st.file_uploader(
+        "회사/현장 센서 CSV 업로드",
+        type=["csv"],
+        help="컬럼명이 달라도 자동 매핑 후보를 먼저 보여줍니다. 필요하면 아래에서 직접 수정할 수 있습니다.",
+        key="smart_company_csv_upload",
+    )
+
+    if uploaded_file is None:
+        st.info("샘플 CSV를 내려받아 구조를 확인한 뒤 업로드하세요. API key는 예측에는 필요 없고 GenAI 리포트 생성에만 필요합니다.")
+        return
+
+    try:
+        uploaded_df = pd.read_csv(uploaded_file)
+    except Exception as error:
+        st.error("CSV 파일을 읽는 중 문제가 발생했습니다.")
+        st.code(str(error), language="text")
+        return
+
+    if uploaded_df.empty:
+        st.error("업로드한 CSV에 row가 없습니다.")
+        return
+
+    st.markdown("#### 1. 업로드 데이터 미리보기")
+    st.dataframe(uploaded_df.head(20), width="stretch")
+
+    suggested_mapping = infer_column_mapping(uploaded_df)
+    st.markdown("#### 2. 컬럼 자동 매핑 확인")
+    st.caption("자동 추천값이 틀리면 source column을 직접 바꾸세요. Type이 없으면 기본 M으로 채워 예측하되 품질 경고를 남깁니다.")
+    st.dataframe(suggested_mapping, width="stretch", hide_index=True)
+
+    source_options = ["(not mapped)"] + uploaded_df.columns.astype(str).tolist()
+    mapping: dict[str, str] = {}
+    unit_conversions: dict[str, str] = {}
+    mapping_columns = st.columns(2)
+    for index, canonical in enumerate(CANONICAL_SENSOR_COLUMNS):
+        default_source = suggested_mapping.loc[
+            suggested_mapping["canonical_column"] == canonical,
+            "suggested_source_column",
+        ].iloc[0]
+        default_index = source_options.index(default_source) if default_source in source_options else 0
+        with mapping_columns[index % 2]:
+            selected_source = st.selectbox(
+                canonical,
+                options=source_options,
+                index=default_index,
+                key=f"smart_mapping_{canonical}",
+            )
+            mapping[canonical] = "" if selected_source == "(not mapped)" else selected_source
+            if canonical in NUMERIC_SENSOR_COLUMNS:
+                unit_conversions[canonical] = st.selectbox(
+                    f"{canonical} unit",
+                    options=UNIT_OPTIONS,
+                    index=0,
+                    key=f"smart_unit_{canonical}",
+                )
+
+    policy_id = st.radio(
+        "운영 정책",
+        options=["balanced", "precision_first", "recall_first"],
+        index=0,
+        horizontal=True,
+        format_func=lambda value: {
+            "balanced": "균형 balanced",
+            "precision_first": "오경보 감소 precision_first",
+            "recall_first": "미탐 감소 recall_first",
+        }[value],
+        help="정책에 따라 High Risk threshold와 예상 alert trade-off가 달라집니다.",
+    )
+
+    if st.button("전처리와 예측 실행", type="primary", key="smart_predict_button"):
+        try:
+            with st.spinner("컬럼 매핑, 품질 진단, calibration 확률 예측을 실행하는 중입니다..."):
+                result = predict_company_sensor_csv(
+                    uploaded_df,
+                    mapping=mapping,
+                    unit_conversions=unit_conversions,
+                    policy_id=policy_id,
+                    write_outputs=True,
+                )
+            st.session_state["smart_csv_prediction_result"] = result
+            record_audit(
+                "smart_csv.predict",
+                "success",
+                "upload",
+                getattr(uploaded_file, "name", "company_csv"),
+                {
+                    "row_count": int(len(result["result_df"])),
+                    "quality_score": result["quality_report"]["quality_score"],
+                    "policy_id": policy_id,
+                    "high_risk_count": int((result["result_df"]["risk_status"] == "High Risk").sum()),
+                },
+            )
+            st.success("전처리와 예측이 완료되었습니다.")
+        except Exception as error:
+            record_audit(
+                "smart_csv.predict",
+                "failure",
+                "upload",
+                getattr(uploaded_file, "name", "company_csv"),
+                {"mapping": mapping, "unit_conversions": unit_conversions, "policy_id": policy_id},
+                error_message=str(error),
+            )
+            st.error("전처리 또는 예측 중 문제가 발생했습니다.")
+            st.warning("컬럼 매핑, 단위 선택, 숫자 형식, Type 값, 결측값을 확인하세요.")
+            st.code(str(error), language="text")
+            return
+
+    result = st.session_state.get("smart_csv_prediction_result")
+    if result is None:
+        return
+
+    result_df = result["result_df"]
+    priority_df = result["priority_df"]
+    quality_df = result["quality_df"]
+    quality_report = result["quality_report"]
+    policy = result["policy"]
+    high_risk_count = int((result_df["risk_status"] == "High Risk").sum())
+    max_probability = float(result_df["calibrated_probability"].max())
+
+    st.markdown("#### 3. 데이터 품질 리포트")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        metric_card("Rows", str(len(result_df)), "업로드 row")
+    with col2:
+        metric_card("Quality", f"{quality_report['quality_score']:.1f}", quality_report["quality_status"])
+    with col3:
+        metric_card("Drift Warnings", str(quality_report["drift_warning_count"]), "학습 범위 밖 값")
+    with col4:
+        metric_card("Policy", result["policy_id"], f"threshold {float(policy['threshold']):.2f}")
+    st.dataframe(quality_df, width="stretch", hide_index=True)
+
+    st.markdown("#### 4. 예측/확률 그래프")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        metric_card("High Risk", str(high_risk_count), "정책 threshold 이상")
+    with col2:
+        metric_card("Max Calibrated", f"{max_probability:.4f}", "보정 고장확률")
+    with col3:
+        metric_card("Expected Precision", f"{float(policy['precision']):.4f}", "AI4I 검증 기준")
+    with col4:
+        metric_card("Expected Recall", f"{float(policy['recall']):.4f}", "AI4I 검증 기준")
+
+    chart_df = result_df[["input_row", "raw_probability", "calibrated_probability"]].set_index("input_row")
+    st.line_chart(chart_df, height=320)
+    st.caption("raw probability는 XGBoost 원 확률이고, calibrated probability는 검증 split에서 선택한 calibration을 적용한 확률입니다.")
+
+    display_columns = [
+        "input_row",
+        "Type",
+        "raw_probability",
+        "calibrated_probability",
+        "selected_threshold",
+        "risk_status",
+        "risk_priority_score",
+        "data_quality_status",
+        "recommendation",
+    ]
+    st.dataframe(
+        result_df.sort_values("calibrated_probability", ascending=False)[display_columns],
+        width="stretch",
+        hide_index=True,
+    )
+    st.download_button(
+        "예측 결과 CSV 다운로드",
+        data=csv_download_bytes(result_df),
+        file_name="company_prediction_results.csv",
+        mime="text/csv",
+    )
+
+    st.markdown("#### 5. 위험 우선순위와 작업지시")
+    priority_columns = [
+        "priority_rank",
+        "input_row",
+        "calibrated_probability",
+        "risk_priority_score",
+        "risk_status",
+        "recommendation",
+    ]
+    st.dataframe(priority_df[priority_columns].head(30), width="stretch", hide_index=True)
+    st.download_button(
+        "위험 우선순위 CSV 다운로드",
+        data=csv_download_bytes(priority_df),
+        file_name="company_risk_priority_queue.csv",
+        mime="text/csv",
+    )
+
+    policy_rows = []
+    for policy_name in ["precision_first", "balanced", "recall_first"]:
+        policy_row = result["policies"][policy_name]
+        policy_rows.append(
+            {
+                "policy": policy_name,
+                "threshold": round(float(policy_row["threshold"]), 2),
+                "expected_precision": round(float(policy_row["precision"]), 4),
+                "expected_recall": round(float(policy_row["recall"]), 4),
+                "expected_f1": round(float(policy_row["f1_score"]), 4),
+                "expected_false_alarm": int(policy_row["false_alarm_count"]),
+                "expected_missed_failure": int(policy_row["missed_failure_count"]),
+            }
+        )
+    with st.expander("운영 정책별 threshold와 예상 trade-off"):
+        st.dataframe(pd.DataFrame(policy_rows), width="stretch", hide_index=True)
+
+
 def likely_target_index(columns: list[str]) -> int:
     """Choose a useful default target column for company retraining."""
     target_keywords = ["target", "failure", "fail", "fault", "defect", "quality", "label", "ng", "result", "고장", "불량"]
@@ -2592,6 +2856,45 @@ def render_thesis_evidence_tab() -> None:
     if trace_summary:
         with st.expander("승인형 작업지시 traceability 요약"):
             st.markdown(trace_summary)
+
+    st.markdown("#### 전처리·예측 엔진 상세")
+    if OPTIONAL_FILES["company_input_quality_report"].exists():
+        quality_df = pd.read_csv(OPTIONAL_FILES["company_input_quality_report"])
+        st.dataframe(quality_df, width="stretch", hide_index=True)
+    preprocessing_report = load_optional_markdown(OPTIONAL_FILES["company_preprocessing_report"])
+    if preprocessing_report:
+        with st.expander("회사 CSV 전처리 리포트"):
+            st.markdown(preprocessing_report)
+
+    if OPTIONAL_FILES["probability_calibration_metrics"].exists():
+        calibration_metrics = load_json(OPTIONAL_FILES["probability_calibration_metrics"])
+        st.json(calibration_metrics)
+    if OPTIONAL_FILES["probability_calibration_curve"].exists():
+        st.image(
+            str(OPTIONAL_FILES["probability_calibration_curve"]),
+            caption="Probability calibration curve",
+            width="stretch",
+        )
+    confidence_report = load_optional_markdown(OPTIONAL_FILES["prediction_confidence_report"])
+    if confidence_report:
+        with st.expander("예측 신뢰도 리포트"):
+            st.markdown(confidence_report)
+
+    if OPTIONAL_FILES["operating_policy_thresholds"].exists():
+        policy_payload = load_json(OPTIONAL_FILES["operating_policy_thresholds"])
+        policy_rows = [
+            {"policy": policy_id, **policy}
+            for policy_id, policy in policy_payload.get("policies", {}).items()
+        ]
+        if policy_rows:
+            st.dataframe(pd.DataFrame(policy_rows), width="stretch", hide_index=True)
+    if OPTIONAL_FILES["company_risk_priority_queue"].exists():
+        queue_df = pd.read_csv(OPTIONAL_FILES["company_risk_priority_queue"])
+        st.dataframe(queue_df.head(30), width="stretch", hide_index=True)
+    policy_report = load_optional_markdown(OPTIONAL_FILES["operating_policy_simulation"])
+    if policy_report:
+        with st.expander("운영 정책 시뮬레이션"):
+            st.markdown(policy_report)
 
     evidence_pack = load_optional_markdown(OPTIONAL_FILES["thesis_evidence_pack"])
     if evidence_pack:

@@ -26,67 +26,72 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [1/12] Verifying Stage 14 company retraining outputs...
+echo [1/13] Verifying Stage 14 company retraining outputs...
 "%PYTHON%" src\verify_company_generalization.py
 if errorlevel 1 goto error
 
 echo.
-echo [2/12] Verifying Stage 15-18 local operations outputs...
+echo [2/13] Verifying Stage 15-18 local operations outputs...
 "%PYTHON%" src\verify_stage15_20.py
 if errorlevel 1 goto error
 
 echo.
-echo [3/12] Verifying Stage 19-20 local field-event and decision integration...
+echo [3/13] Verifying Stage 19-20 local field-event and decision integration...
 "%PYTHON%" src\verify_stage19_20_integration.py
 if errorlevel 1 goto error
 
 echo.
-echo [4/12] Running model strategy comparison including SMOTE...
+echo [4/13] Running model strategy comparison including SMOTE...
 "%PYTHON%" src\compare_model_strategies.py
 if errorlevel 1 goto error
 
 echo.
-echo [5/12] Running SPC-only vs ML+SPC alert comparison...
+echo [5/13] Running SPC-only vs ML+SPC alert comparison...
 "%PYTHON%" src\compare_spc_ml_alerts.py
 if errorlevel 1 goto error
 
 echo.
-echo [6/12] Running operational value simulation...
+echo [6/13] Running operational value simulation...
 "%PYTHON%" src\evaluate_operational_value.py
 if errorlevel 1 goto error
 
 echo.
-echo [7/12] Running local MQTT mock field bridge...
+echo [7/13] Verifying smart CSV preprocessing and prediction engine...
+"%PYTHON%" src\verify_preprocessing_prediction_engine.py
+if errorlevel 1 goto error
+
+echo.
+echo [8/13] Running local MQTT mock field bridge...
 "%PYTHON%" src\mock_field_bridge.py --protocol mqtt_mock --rows 2 --create-drafts --decision needs_review
 if errorlevel 1 goto error
 
 echo.
-echo [8/12] Evaluating workflow traceability...
+echo [9/13] Evaluating workflow traceability...
 "%PYTHON%" src\evaluate_workflow_traceability.py
 if errorlevel 1 goto error
 
 echo.
-echo [9/12] Creating product comparison and thesis evidence pack...
+echo [10/13] Creating product comparison and thesis evidence pack...
 "%PYTHON%" src\create_product_comparison_summary.py
 if errorlevel 1 goto error
 
 echo.
-echo [10/12] Regenerating presentation and Stage 19-20 design documents...
+echo [11/13] Regenerating presentation and Stage 19-20 design documents...
 "%PYTHON%" src\create_presentation_summary.py
 if errorlevel 1 goto error
 
 echo.
-echo [11/12] Verifying Stage 19-20 operations design document...
+echo [12/13] Verifying Stage 19-20 operations design document...
 "%PYTHON%" src\verify_stage19_20_design.py
 if errorlevel 1 goto error
 
 echo.
-echo [12/12] Verifying project files and outputs through Stage 20 local integration...
+echo [13/13] Verifying project files and outputs through Stage 20 local integration...
 "%PYTHON%" src\verify_project.py
 if errorlevel 1 goto error
 
 echo.
-echo Verification passed through Stage 20 local integration and thesis evidence outputs.
+echo Verification passed through Stage 20 local integration, thesis evidence, and smart CSV prediction outputs.
 pause
 exit /b 0
 
