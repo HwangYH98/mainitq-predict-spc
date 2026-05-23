@@ -16,7 +16,7 @@ from create_field_validation_protocol import (
     create_field_maintenance_template,
     create_field_validation_kit_zip,
 )
-from evaluate_field_validation_report import evaluate_field_validation, evaluate_field_validation_package
+from evaluate_field_validation_report import _lead_time_metrics, evaluate_field_validation, evaluate_field_validation_package
 
 
 def test_field_validation_report_generates_metrics(tmp_path: Path) -> None:
@@ -49,6 +49,39 @@ def test_field_validation_report_requires_labels(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="actual_failure|missing required"):
         evaluate_field_validation(field_path, cost_path, tmp_path / "outputs")
+
+
+def test_lead_time_metrics_count_failure_events_not_rows() -> None:
+    field_df = pd.DataFrame(
+        [
+            {
+                "equipment_id": "EQ-001",
+                "timestamp": "2026-05-01T00:00:00Z",
+                "failure_timestamp": "2026-05-01T00:10:00Z",
+                "actual_failure": 0,
+            },
+            {
+                "equipment_id": "EQ-001",
+                "timestamp": "2026-05-01T00:05:00Z",
+                "failure_timestamp": "2026-05-01T00:10:00Z",
+                "actual_failure": 1,
+            },
+            {
+                "equipment_id": "EQ-001",
+                "timestamp": "2026-05-01T00:06:00Z",
+                "failure_timestamp": "2026-05-01T00:10:00Z",
+                "actual_failure": 1,
+            },
+        ]
+    )
+    result_df = pd.DataFrame({"risk_status": ["High Risk", "Low Risk", "Low Risk"]})
+
+    metrics = _lead_time_metrics(field_df, result_df)
+
+    assert metrics["failure_event_count"] == 1
+    assert metrics["lead_time_events"] == 1
+    assert metrics["early_warning_rate"] == 1.0
+    assert metrics["lead_time_minutes_mean"] == 10.0
 
 
 def test_field_validation_report_marks_template_mode(tmp_path: Path) -> None:

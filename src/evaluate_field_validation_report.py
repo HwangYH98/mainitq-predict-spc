@@ -97,25 +97,42 @@ def _lead_time_metrics(field_df: pd.DataFrame, result_df: pd.DataFrame) -> dict[
     merged["timestamp"] = pd.to_datetime(merged["timestamp"], errors="coerce", utc=True)
     merged["failure_timestamp"] = pd.to_datetime(merged["failure_timestamp"], errors="coerce", utc=True)
 
+    actual_failure = pd.to_numeric(merged["actual_failure"], errors="coerce").fillna(0).astype(int)
+    failure_rows = merged[(actual_failure == 1) & merged["failure_timestamp"].notna()].copy()
+    if failure_rows.empty:
+        return {
+            "lead_time_minutes_mean": None,
+            "early_warning_rate": 0.0,
+            "lead_time_events": 0,
+            "failure_event_count": 0,
+        }
+
+    if "failure_event_id" in failure_rows.columns and failure_rows["failure_event_id"].notna().any():
+        event_key = ["failure_event_id"]
+    else:
+        event_key = ["equipment_id", "failure_timestamp"]
+    failure_events = failure_rows.sort_values("failure_timestamp").drop_duplicates(event_key)
+
     lead_times: list[float] = []
-    failure_groups = merged[merged["actual_failure"].astype(int) == 1].groupby("equipment_id", dropna=False)
-    for _, group in failure_groups:
-        failure_time = group["failure_timestamp"].dropna().min()
+    for _, event in failure_events.iterrows():
+        failure_time = event["failure_timestamp"]
         if pd.isna(failure_time):
             continue
+        group = merged[merged["equipment_id"].eq(event["equipment_id"])]
         alerts = group[(group["predicted_alert"]) & (group["timestamp"].notna()) & (group["timestamp"] <= failure_time)]
         if alerts.empty:
             continue
         first_alert = alerts["timestamp"].min()
         lead_times.append(float((failure_time - first_alert).total_seconds() / 60.0))
 
-    failure_count = int((merged["actual_failure"].astype(int) == 1).sum())
+    failure_count = len(failure_events)
     early_warning_rate = _safe_rate(len(lead_times), failure_count)
     mean_lead_time = round(float(np.mean(lead_times)), 3) if lead_times else None
     return {
         "lead_time_minutes_mean": mean_lead_time,
         "early_warning_rate": round(early_warning_rate, 6),
         "lead_time_events": len(lead_times),
+        "failure_event_count": failure_count,
     }
 
 

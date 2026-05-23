@@ -4010,8 +4010,8 @@ def render_limitations_tab(stage9_applicability: str, stage19_20_design: str, fi
         st.markdown(final_roadmap)
 
 
-def main() -> None:
-    """Run the Streamlit read-only results dashboard."""
+def _legacy_presentation_main() -> None:
+    """Run the older presentation dashboard kept for local reference only."""
     configure_page()
     render_header()
 

@@ -345,12 +345,14 @@ class DataPredictionPage(QWidget):
         if self.input_df is None:
             QMessageBox.warning(self, "CSV 필요", "먼저 CSV를 불러오세요.")
             return
+        cursor_active = False
+        selected = self.selected_model()
         try:
             self.empty_state.setVisible(False)
             self.message_label.setText("예측 실행 중입니다. 데이터 품질 진단과 위험도 계산을 처리하고 있습니다...")
             QApplication.processEvents()
             QApplication.setOverrideCursor(Qt.WaitCursor)
-            selected = self.selected_model()
+            cursor_active = True
             if selected == MODEL_SCANIA:
                 from scania_product_engine import predict_scania_csv
 
@@ -367,7 +369,6 @@ class DataPredictionPage(QWidget):
                     write_outputs=True,
                 )
                 self.prediction_result["schema"] = MODEL_AI4I
-            QApplication.restoreOverrideCursor()
             self.render_prediction_result()
             record_audit(
                 self.actor,
@@ -378,9 +379,11 @@ class DataPredictionPage(QWidget):
                 {"rows": len(self.prediction_result["result_df"]), "schema": selected},
             )
         except Exception as error:
-            QApplication.restoreOverrideCursor()
-            record_audit(self.actor, "desktop_prediction_completed", "error", "prediction", self.selected_model(), error_message=str(error))
+            record_audit(self.actor, "desktop_prediction_completed", "error", "prediction", selected, error_message=str(error))
             show_error(self, "예측 실패", error)
+        finally:
+            if cursor_active:
+                QApplication.restoreOverrideCursor()
 
     def render_prediction_result(self) -> None:
         if not self.prediction_result:
