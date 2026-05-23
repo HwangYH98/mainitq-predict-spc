@@ -25,8 +25,24 @@ __pycache__/
 Thumbs.db
 
 # Local operation/runtime artifacts that are regenerated during demos
+outputs/*
+!outputs/thesis_evidence_pack.md
+!outputs/industrial_engineering_evidence.md
+!outputs/field_validation_protocol.md
+!outputs/field_data_template.csv
+!outputs/field_cost_template.csv
+!outputs/run_to_failure_evidence_summary.md
 outputs/operations.db
+outputs/operations_lite.db
 outputs/realtime_stream/
 outputs/work_order_drafts/
 outputs/custom_company_model/*.joblib
+outputs/*screenshot*
 local_presentation_notes/
+data_external/
+
+# Local Windows launcher build outputs
+build/
+dist/
+release/
+*.spec

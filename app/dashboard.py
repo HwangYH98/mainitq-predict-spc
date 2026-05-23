@@ -3,6 +3,7 @@ import hmac
 import os
 import re
 import sys
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ COMPANY_OUTPUT_DIR = OUTPUT_DIR / "custom_company_model"
 OPERATIONS_DB_PATH = OUTPUT_DIR / "operations.db"
 STAGE15_20_ARCHITECTURE_PATH = OUTPUT_DIR / "stage15_20_architecture.md"
 WORK_ORDER_DECISIONS_PATH = OUTPUT_DIR / "work_order_decisions.csv"
+LOCAL_NOTES_DIR = PROJECT_ROOT / "local_presentation_notes"
 
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
@@ -98,6 +100,7 @@ OPTIONAL_FILES = {
     "workflow_traceability_summary": OUTPUT_DIR / "workflow_traceability_summary.md",
     "workflow_traceability_comparison": OUTPUT_DIR / "workflow_traceability_summary.csv",
     "thesis_evidence_pack": OUTPUT_DIR / "thesis_evidence_pack.md",
+    "industrial_engineering_evidence": OUTPUT_DIR / "industrial_engineering_evidence.md",
     "company_input_quality_report": OUTPUT_DIR / "company_input_quality_report.csv",
     "company_preprocessing_report": OUTPUT_DIR / "company_preprocessing_report.md",
     "probability_calibration_metrics": OUTPUT_DIR / "probability_calibration_metrics.json",
@@ -107,6 +110,40 @@ OPTIONAL_FILES = {
     "company_prediction_results": OUTPUT_DIR / "company_prediction_results.csv",
     "company_risk_priority_queue": OUTPUT_DIR / "company_risk_priority_queue.csv",
     "operating_policy_simulation": OUTPUT_DIR / "operating_policy_simulation.md",
+    "open_industrial_validation_metrics": OUTPUT_DIR / "open_industrial_validation_metrics.csv",
+    "open_industrial_validation_report": OUTPUT_DIR / "open_industrial_validation_report.md",
+    "open_industrial_cost_simulation": OUTPUT_DIR / "open_industrial_cost_simulation.csv",
+    "open_industrial_lead_time_report": OUTPUT_DIR / "open_industrial_lead_time_report.md",
+    "open_industrial_lead_time_chart": OUTPUT_DIR / "open_industrial_lead_time_chart.png",
+    "public_industrial_validation_metrics": OUTPUT_DIR / "public_industrial_validation_metrics.csv",
+    "public_industrial_lead_time_metrics": OUTPUT_DIR / "public_industrial_lead_time_metrics.csv",
+    "public_industrial_cost_simulation": OUTPUT_DIR / "public_industrial_cost_simulation.csv",
+    "public_industrial_rul_metrics": OUTPUT_DIR / "public_industrial_rul_metrics.csv",
+    "public_industrial_validation_report": OUTPUT_DIR / "public_industrial_validation_report.md",
+    "public_benchmark_claims": OUTPUT_DIR / "public_benchmark_claims.md",
+    "public_industrial_lead_time_chart": OUTPUT_DIR / "public_industrial_lead_time_chart.png",
+    "public_industrial_cost_chart": OUTPUT_DIR / "public_industrial_cost_chart.png",
+    "public_industrial_rul_chart": OUTPUT_DIR / "public_industrial_rul_chart.png",
+    "public_industrial_confusion_matrix": OUTPUT_DIR / "public_industrial_confusion_matrix.png",
+    "scania_official_cost_metrics": OUTPUT_DIR / "scania_official_cost_metrics.csv",
+    "scania_official_cost_report": OUTPUT_DIR / "scania_official_cost_report.md",
+    "scania_official_cost_chart": OUTPUT_DIR / "scania_official_cost_comparison.png",
+    "scania_official_confusion_matrix": OUTPUT_DIR / "scania_official_confusion_matrix.png",
+    "field_validation_protocol": OUTPUT_DIR / "field_validation_protocol.md",
+    "field_data_template": OUTPUT_DIR / "field_data_template.csv",
+    "field_maintenance_template": OUTPUT_DIR / "field_maintenance_template.csv",
+    "field_cost_template": OUTPUT_DIR / "field_cost_template.csv",
+    "field_validation_data_request_kit": OUTPUT_DIR / "field_validation_data_request_kit.zip",
+    "field_validation_report": OUTPUT_DIR / "field_validation_report.md",
+    "field_validation_report_csv": OUTPUT_DIR / "field_validation_report.csv",
+    "field_validation_report_json": OUTPUT_DIR / "field_validation_report.json",
+}
+
+LOCAL_NOTE_FILES = {
+    "presentation_talk_track": LOCAL_NOTES_DIR / "presentation_talk_track.md",
+    "thesis_claims_and_limits": LOCAL_NOTES_DIR / "thesis_claims_and_limits.md",
+    "industrial_engineering_notes": LOCAL_NOTES_DIR / "industrial_engineering_notes.md",
+    "github_upload_checklist": LOCAL_NOTES_DIR / "github_upload_checklist.md",
 }
 
 RAW_UPLOAD_COLUMNS = [
@@ -203,7 +240,7 @@ FEATURE_GUIDANCE = {
 }
 
 
-def configure_page(page_title: str = "AI 예지보전 SPC 대시보드") -> None:
+def configure_page(page_title: str = "AI 예지보전 운영 대시보드") -> None:
     """Set page metadata and product-style dashboard styling."""
     st.set_page_config(
         page_title=page_title,
@@ -251,7 +288,7 @@ def configure_page(page_title: str = "AI 예지보전 SPC 대시보드") -> None
             font-size: 1.05rem;
             margin: 0;
         }
-        .stage-badge {
+        .app-badge {
             display: inline-block;
             border-radius: 999px;
             padding: 0.35rem 0.75rem;
@@ -505,7 +542,7 @@ def require_login(role: str) -> dict:
         st.stop()
 
     st.subheader(f"{role_label} 로그인")
-    st.caption("비밀번호는 현재 세션 검증에만 사용하며 파일에 저장하지 않습니다.")
+    st.caption("비밀번호는 현재 세션 인증에만 사용하며 파일에 저장하지 않습니다.")
     with st.form(f"{role}_login_form"):
         actor_id = st.text_input(
             "사용자 ID",
@@ -513,7 +550,7 @@ def require_login(role: str) -> dict:
             key=f"{role}_login_actor_id",
         )
         supplied = st.text_input(
-            "Password",
+            "비밀번호",
             type="password",
             key=f"{role}_login_password",
         )
@@ -526,7 +563,7 @@ def require_login(role: str) -> dict:
             st.session_state["auth_user"] = actor
             record_audit("auth.login", "success", "session", role, actor=actor)
             st.success("로그인되었습니다.")
-            return actor
+            st.rerun()
         record_audit(
             "auth.login",
             "failure",
@@ -544,7 +581,7 @@ def render_genai_sidebar_settings() -> dict:
     """Collect optional GenAI settings in the sidebar without persisting secrets."""
     st.sidebar.markdown("### GenAI API 설정")
     provider_label = st.sidebar.radio(
-        "Provider",
+        "리포트 API",
         options=["Gemini", "OpenAI"],
         index=0,
         horizontal=True,
@@ -555,7 +592,7 @@ def render_genai_sidebar_settings() -> dict:
     model_key = f"genai_{provider}_model"
     st.session_state.setdefault(model_key, GENAI_DEFAULT_MODELS[provider])
     model = st.sidebar.text_input(
-        "Model",
+        "모델",
         key=model_key,
         help="기본값을 그대로 사용해도 됩니다.",
     ).strip()
@@ -586,6 +623,20 @@ def genai_status_text(settings: dict) -> str:
     if settings.get("has_key"):
         return f"{settings['provider_label']} key 입력됨 / model {settings['model']}"
     return "API key 없음: 저장된 리포트만 표시"
+
+
+def summarize_report_mode(report_mode: str) -> tuple[str, str]:
+    """Translate internal report mode values into product-friendly labels."""
+    mode = str(report_mode or "not generated")
+    if mode.startswith("gemini_generate_content"):
+        return "생성됨", "Gemini 기반"
+    if mode.startswith("openai_responses_api"):
+        return "생성됨", "OpenAI 기반"
+    if mode.startswith("fallback"):
+        return "저장 리포트", "API key 없이 저장본 표시"
+    if mode in {"not generated", "", "none"}:
+        return "미생성", "API key 입력 후 생성 가능"
+    return "저장 리포트", "상세 모드는 Admin에서 확인"
 
 
 def genai_report_with_sidebar_settings(context: dict, settings: dict) -> tuple[str, str]:
@@ -923,18 +974,17 @@ def metric_card(label: str, value: str, note: str) -> None:
 
 
 def render_header(
-    badge: str = "제품형 MVP",
-    title: str = "AI 예지보전 SPC 대시보드",
+    badge: str = "운영 대시보드",
+    title: str = "AI 예지보전 운영 대시보드",
     subtitle: str = (
-        "센서 CSV를 업로드하면 고장 확률, High Risk 판정, SPC 그래프, "
-        "GenAI 관리자 리포트, 승인형 작업지시 흐름을 한 화면에서 확인합니다."
+        "센서 CSV를 기반으로 고장 확률, 위험 우선순위, AI 리포트, 작업지시 이력을 관리합니다."
     ),
 ) -> None:
     """Render dashboard title and badge."""
     st.markdown(
         f"""
         <div class="hero">
-            <div class="stage-badge">{badge}</div>
+            <div class="app-badge">{badge}</div>
             <h1>{title}</h1>
             <p>{subtitle}</p>
         </div>
@@ -1322,7 +1372,7 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         data=csv_download_bytes(sample_df),
         file_name="sample_field_sensor_rows.csv",
         mime="text/csv",
-        help="업로드 형식을 확인하거나 발표 중 즉시 테스트할 때 사용할 수 있는 예시 파일입니다.",
+        help="업로드 형식을 확인하거나 즉시 테스트할 때 사용할 수 있는 예시 파일입니다.",
     )
 
     uploaded_file = st.file_uploader(
@@ -1437,38 +1487,34 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
 
 def render_field_csv_tab(threshold_summary: dict) -> None:
     """Render a company CSV wizard with mapping, quality, calibrated prediction, and priority."""
-    st.subheader("CSV 예측")
+    st.subheader("데이터 예측")
     st.caption(
         "회사별 CSV를 업로드하면 컬럼 자동 매핑, 단위 변환, 품질 진단, 보정 확률, 위험 우선순위를 한 흐름으로 확인합니다."
     )
 
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {"단계": 1, "이름": "CSV 업로드", "출력": "원본 미리보기와 샘플 다운로드"},
-                {"단계": 2, "이름": "컬럼 자동 매핑 확인", "출력": "회사 컬럼을 AI4I 기준 센서 컬럼으로 연결"},
-                {"단계": 3, "이름": "데이터 품질 리포트", "출력": "결측값, 숫자 변환 실패, 이상 범위, 중복 row"},
-                {"단계": 4, "이름": "예측/확률 그래프", "출력": "raw probability와 calibrated probability"},
-                {"단계": 5, "이름": "위험 우선순위와 작업지시", "출력": "risk priority score와 추천 조치"},
-            ]
-        ),
-        width="stretch",
-        hide_index=True,
-    )
+    step_col1, step_col2, step_col3, step_col4 = st.columns(4)
+    with step_col1:
+        metric_card("1. 샘플 다운로드", "확인", "기본/회사형 예시")
+    with step_col2:
+        metric_card("2. CSV 업로드", "입력", "센서 row 파일")
+    with step_col3:
+        metric_card("3. 컬럼 확인", "매핑", "단위·결측 점검")
+    with step_col4:
+        metric_card("4. 예측 실행", "출력", "확률·우선순위")
 
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("#### AI4I형 샘플")
+        st.markdown("#### 1. 기본 센서 샘플")
         ai4i_sample = sample_field_dataframe()
         st.dataframe(ai4i_sample, width="stretch", hide_index=True)
         st.download_button(
-            "AI4I형 샘플 CSV 다운로드",
+            "기본 센서 샘플 CSV 다운로드",
             data=csv_download_bytes(ai4i_sample),
             file_name="sample_ai4i_sensor_rows.csv",
             mime="text/csv",
         )
     with col2:
-        st.markdown("#### 회사형 샘플")
+        st.markdown("#### 1. 회사형 샘플")
         company_sample = sample_company_alias_dataframe()
         st.dataframe(company_sample, width="stretch", hide_index=True)
         st.download_button(
@@ -1478,6 +1524,38 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
             mime="text/csv",
         )
 
+    with st.expander("CSV 형식과 처리 흐름 자세히 보기"):
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"단계": 1, "이름": "샘플 다운로드", "출력": "필요한 센서 컬럼 구조 확인"},
+                    {"단계": 2, "이름": "CSV 업로드", "출력": "원본 데이터 미리보기"},
+                    {"단계": 3, "이름": "컬럼 확인", "출력": "회사 컬럼을 기준 센서 컬럼으로 연결"},
+                    {"단계": 4, "이름": "예측 실행", "출력": "고장 확률, 위험 판정, 위험 우선순위"},
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+        st.dataframe(
+            pd.DataFrame(
+                {
+                    "필수 센서": CANONICAL_SENSOR_COLUMNS,
+                    "설명": [
+                        "제품 또는 운전 조건 등급",
+                        "공기 온도",
+                        "공정 온도",
+                        "회전 속도",
+                        "토크",
+                        "공구 마모 시간",
+                    ],
+                }
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+
+    st.markdown("#### 2. CSV 업로드")
     uploaded_file = st.file_uploader(
         "회사/현장 센서 CSV 업로드",
         type=["csv"],
@@ -1486,7 +1564,7 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     )
 
     if uploaded_file is None:
-        st.info("샘플 CSV를 내려받아 구조를 확인한 뒤 업로드하세요. API key는 예측에는 필요 없고 GenAI 리포트 생성에만 필요합니다.")
+        st.info("샘플 CSV를 내려받아 구조를 확인한 뒤 업로드하세요. API key는 예측에는 필요 없고 AI 리포트 생성에만 필요합니다.")
         return
 
     try:
@@ -1500,11 +1578,11 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         st.error("업로드한 CSV에 row가 없습니다.")
         return
 
-    st.markdown("#### 1. 업로드 데이터 미리보기")
+    st.markdown("#### 3. 업로드 데이터 미리보기")
     st.dataframe(uploaded_df.head(20), width="stretch")
 
     suggested_mapping = infer_column_mapping(uploaded_df)
-    st.markdown("#### 2. 컬럼 자동 매핑 확인")
+    st.markdown("#### 3. 컬럼 확인")
     st.caption("자동 추천값이 틀리면 source column을 직접 바꾸세요. Type이 없으면 기본 M으로 채워 예측하되 품질 경고를 남깁니다.")
     st.dataframe(suggested_mapping, width="stretch", hide_index=True)
 
@@ -1547,6 +1625,7 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         help="정책에 따라 High Risk threshold와 예상 alert trade-off가 달라집니다.",
     )
 
+    st.markdown("#### 4. 예측 실행")
     if st.button("전처리와 예측 실행", type="primary", key="smart_predict_button"):
         try:
             with st.spinner("컬럼 매핑, 품질 진단, calibration 확률 예측을 실행하는 중입니다..."):
@@ -1597,33 +1676,72 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     high_risk_count = int((result_df["risk_status"] == "High Risk").sum())
     max_probability = float(result_df["calibrated_probability"].max())
 
-    st.markdown("#### 3. 데이터 품질 리포트")
+    st.markdown("#### 예측 요약")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        metric_card("Rows", str(len(result_df)), "업로드 row")
+        metric_card("데이터 row", str(len(result_df)), "업로드 건수")
     with col2:
-        metric_card("Quality", f"{quality_report['quality_score']:.1f}", quality_report["quality_status"])
+        metric_card("고위험 건수", str(high_risk_count), "선택 정책 기준")
     with col3:
-        metric_card("Drift Warnings", str(quality_report["drift_warning_count"]), "학습 범위 밖 값")
+        metric_card("최고 고장확률", f"{max_probability:.4f}", "보정 확률")
     with col4:
-        metric_card("Policy", result["policy_id"], f"threshold {float(policy['threshold']):.2f}")
-    st.dataframe(quality_df, width="stretch", hide_index=True)
+        metric_card("품질 점수", f"{quality_report['quality_score']:.1f}", quality_report["quality_status"])
+    st.caption(f"운영 정책: {result['policy_id']} / 위험 판정 기준 {float(policy['threshold']):.2f}")
 
-    st.markdown("#### 4. 예측/확률 그래프")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        metric_card("High Risk", str(high_risk_count), "정책 threshold 이상")
-    with col2:
-        metric_card("Max Calibrated", f"{max_probability:.4f}", "보정 고장확률")
-    with col3:
-        metric_card("Expected Precision", f"{float(policy['precision']):.4f}", "AI4I 검증 기준")
-    with col4:
-        metric_card("Expected Recall", f"{float(policy['recall']):.4f}", "AI4I 검증 기준")
-
-    chart_df = result_df[["input_row", "raw_probability", "calibrated_probability"]].set_index("input_row")
+    st.markdown("#### 확률 그래프")
+    chart_df = (
+        result_df[["input_row", "raw_probability", "calibrated_probability"]]
+        .rename(
+            columns={
+                "input_row": "입력 row",
+                "raw_probability": "원 확률",
+                "calibrated_probability": "보정 고장확률",
+            }
+        )
+        .set_index("입력 row")
+    )
     st.line_chart(chart_df, height=320)
-    st.caption("raw probability는 XGBoost 원 확률이고, calibrated probability는 검증 split에서 선택한 calibration을 적용한 확률입니다.")
+    st.caption("원 확률은 모델의 기본 출력이고, 보정 고장확률은 기준 데이터에서 선택한 확률 보정을 적용한 값입니다.")
 
+    st.markdown("#### 위험 우선순위")
+    priority_columns = [
+        "priority_rank",
+        "input_row",
+        "calibrated_probability",
+        "risk_priority_score",
+        "risk_status",
+        "recommendation",
+    ]
+    priority_display = priority_df[priority_columns].head(30).rename(
+        columns={
+            "priority_rank": "우선순위",
+            "input_row": "입력 row",
+            "calibrated_probability": "보정 고장확률",
+            "risk_priority_score": "우선순위 점수",
+            "risk_status": "위험 상태",
+            "recommendation": "추천 조치",
+        }
+    )
+    st.dataframe(priority_display, width="stretch", hide_index=True)
+    st.download_button(
+        "위험 우선순위 CSV 다운로드",
+        data=csv_download_bytes(priority_df),
+        file_name="company_risk_priority_queue.csv",
+        mime="text/csv",
+    )
+
+    with st.expander("데이터 품질 상세 보기"):
+        quality_display = quality_df.rename(
+            columns={
+                "check": "점검 항목",
+                "status": "상태",
+                "detail": "상세",
+                "affected_rows": "영향 row",
+            }
+        )
+        st.dataframe(quality_display, width="stretch", hide_index=True)
+
+    st.markdown("#### 예측 결과표와 다운로드")
     display_columns = [
         "input_row",
         "Type",
@@ -1635,8 +1753,20 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         "data_quality_status",
         "recommendation",
     ]
+    result_display = result_df.sort_values("calibrated_probability", ascending=False)[display_columns].rename(
+        columns={
+            "input_row": "입력 row",
+            "raw_probability": "원 확률",
+            "calibrated_probability": "보정 고장확률",
+            "selected_threshold": "위험 기준",
+            "risk_status": "위험 상태",
+            "risk_priority_score": "우선순위 점수",
+            "data_quality_status": "품질 상태",
+            "recommendation": "추천 조치",
+        }
+    )
     st.dataframe(
-        result_df.sort_values("calibrated_probability", ascending=False)[display_columns],
+        result_display,
         width="stretch",
         hide_index=True,
     )
@@ -1647,38 +1777,21 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         mime="text/csv",
     )
 
-    st.markdown("#### 5. 위험 우선순위와 작업지시")
-    priority_columns = [
-        "priority_rank",
-        "input_row",
-        "calibrated_probability",
-        "risk_priority_score",
-        "risk_status",
-        "recommendation",
-    ]
-    st.dataframe(priority_df[priority_columns].head(30), width="stretch", hide_index=True)
-    st.download_button(
-        "위험 우선순위 CSV 다운로드",
-        data=csv_download_bytes(priority_df),
-        file_name="company_risk_priority_queue.csv",
-        mime="text/csv",
-    )
-
     policy_rows = []
     for policy_name in ["precision_first", "balanced", "recall_first"]:
         policy_row = result["policies"][policy_name]
         policy_rows.append(
             {
-                "policy": policy_name,
-                "threshold": round(float(policy_row["threshold"]), 2),
-                "expected_precision": round(float(policy_row["precision"]), 4),
-                "expected_recall": round(float(policy_row["recall"]), 4),
-                "expected_f1": round(float(policy_row["f1_score"]), 4),
-                "expected_false_alarm": int(policy_row["false_alarm_count"]),
-                "expected_missed_failure": int(policy_row["missed_failure_count"]),
+                "운영 정책": policy_name,
+                "위험 판정 기준": round(float(policy_row["threshold"]), 2),
+                "예상 정밀도": round(float(policy_row["precision"]), 4),
+                "예상 재현율": round(float(policy_row["recall"]), 4),
+                "예상 F1": round(float(policy_row["f1_score"]), 4),
+                "예상 오경보": int(policy_row["false_alarm_count"]),
+                "예상 미탐": int(policy_row["missed_failure_count"]),
             }
         )
-    with st.expander("운영 정책별 threshold와 예상 trade-off"):
+    with st.expander("운영 정책별 위험 기준과 예상 trade-off"):
         st.dataframe(pd.DataFrame(policy_rows), width="stretch", hide_index=True)
 
 
@@ -1874,33 +1987,272 @@ def render_company_training_result(result: dict) -> None:
         )
 
 
-def render_company_retraining_tab() -> None:
-    """Render Stage 14-lite custom company CSV mapping and retraining PoC."""
-    st.subheader("회사 CSV 재검증")
-    st.caption(
-        "라벨이 있는 회사 CSV를 업로드해 target, ID/time 컬럼, 단위 변환을 지정하고 "
-        "회사 데이터 기준 Logistic Regression/XGBoost를 새로 학습합니다."
-    )
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {"순서": 1, "사용자 입력": "라벨이 있는 회사 CSV", "확인 내용": "target label, 설비 ID, timestamp, 센서 feature"},
-                {"순서": 2, "사용자 선택": "target / ID-time / 단위 변환", "확인 내용": "학습 feature와 보존 컬럼 분리"},
-                {"순서": 3, "시스템 출력": "재학습 성능과 SHAP 요인", "확인 내용": "AI4I baseline 대비 회사 CSV split 성능"},
-            ]
-        ),
-        width="stretch",
-        hide_index=True,
+def build_sample_labeled_company_dataframe() -> pd.DataFrame:
+    """Create an AI4I-derived labeled company CSV for safe sample validation."""
+    ai4i = pd.read_csv(DATA_PATH)
+    return pd.DataFrame(
+        {
+            "asset_id": ai4i["UDI"],
+            "event_time": pd.date_range("2026-01-01", periods=len(ai4i), freq="min"),
+            "product_family": ai4i["Type"],
+            "air_temp_celsius": ai4i["Air temperature [K]"] - 273.15,
+            "process_temp_celsius": ai4i["Process temperature [K]"] - 273.15,
+            "spindle_speed": ai4i["Rotational speed [rpm]"],
+            "load_torque": ai4i["Torque [Nm]"],
+            "tool_age_min": ai4i["Tool wear [min]"],
+            "quality_result": ai4i["Machine failure"].map({0: "ok", 1: "failure"}),
+        }
     )
 
+
+def render_sample_company_revalidation() -> None:
+    """Show the sample-company path separately from real company validation."""
+    st.markdown("#### 샘플 데이터 재검증")
+    st.caption(
+        "AI4I를 회사형 컬럼명과 Celsius 단위로 바꾼 샘플입니다. "
+        "기능 확인용이며 실제 회사 데이터 성능 검증으로 표현하지 않습니다."
+    )
+    sample_df = build_sample_labeled_company_dataframe()
+    st.dataframe(sample_df.head(8), width="stretch", hide_index=True)
+    sample_csv = sample_df.head(200).to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+    st.download_button(
+        "샘플 labeled company CSV 다운로드",
+        data=sample_csv,
+        file_name="sample_labeled_company_csv.csv",
+        mime="text/csv",
+    )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        metric_card("Rows", str(len(sample_df)), "AI4I-derived sample")
+    with col2:
+        metric_card("Target", "quality_result", "ok/failure")
+    with col3:
+        metric_card("Scope", "Sample", "not real company validation")
+
+    if COMPANY_OUTPUT_DIR.exists():
+        metrics_path = COMPANY_OUTPUT_DIR / "custom_metrics.json"
+        threshold_path = COMPANY_OUTPUT_DIR / "custom_threshold_summary.json"
+        predictions_path = COMPANY_OUTPUT_DIR / "custom_predictions.csv"
+        if metrics_path.exists() and threshold_path.exists() and predictions_path.exists():
+            metrics = load_json(metrics_path)
+            threshold = load_json(threshold_path)
+            predictions = pd.read_csv(predictions_path)
+            xgb = metrics["models"]["xgboost"]
+            st.markdown("##### 저장된 샘플 재검증 결과")
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "dataset": "AI4I-derived sample company CSV",
+                            "best_model": metrics["best_model_by_pr_auc"],
+                            "xgboost_pr_auc": xgb["pr_auc"],
+                            "xgboost_f1": xgb["f1_score"],
+                            "selected_threshold": threshold["selected_threshold"],
+                            "high_risk_rows": int((predictions["risk_status"] == "High Risk").sum()),
+                            "claim_limit": "sample validation only",
+                        }
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+        else:
+            st.info("샘플 재검증 산출물은 `src\\verify_company_generalization.py` 실행 후 표시됩니다.")
+    else:
+        st.info("샘플 재검증 산출물은 `src\\verify_company_generalization.py` 실행 후 표시됩니다.")
+
+
+def render_company_retraining_tab() -> None:
+    """Render sample and real labeled company CSV revalidation paths."""
+    st.subheader("회사 CSV 재검증")
+    st.caption(
+        "샘플 데이터 검증과 실제 labeled company CSV 검증을 분리해서 표시합니다. "
+        "라벨 없는 CSV는 데이터 예측 탭에서 예측/품질 진단만 수행합니다."
+    )
+
+    sample_tab, real_tab = st.tabs(["샘플 데이터 재검증", "실제 labeled company CSV 재검증"])
+    with sample_tab:
+        render_sample_company_revalidation()
+
+    with real_tab:
+        st.markdown("#### 실제 labeled company CSV 재검증")
+        st.caption(
+            "실제 회사 데이터로 성능을 말하려면 고장/정상 라벨, 설비 ID, timestamp, 센서 feature가 포함된 CSV가 필요합니다."
+        )
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"구분": "필수", "항목": "target label", "설명": "고장/정상 또는 불량/정상 라벨"},
+                    {"구분": "권장", "항목": "equipment/time", "설명": "설비 ID, timestamp, lot/batch 정보"},
+                    {"구분": "필수", "항목": "sensor feature", "설명": "온도, 회전속도, 토크, 마모 등 숫자형 센서"},
+                    {"구분": "선택", "항목": "unit conversion", "설명": "Celsius -> Kelvin 등 단위 표준화"},
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+        st.warning(
+            "실제 회사 CSV를 업로드해 재학습/평가한 경우에만 실제 회사 데이터 재검증 결과라고 표현합니다. "
+            "라벨 없는 CSV는 성능 지표를 계산할 수 없습니다."
+        )
+        render_real_company_retraining_form()
+
+
+def render_field_validation_evidence_tab() -> None:
+    """Render field-validation report generation from company logs."""
+    st.subheader("회사 데이터 실증")
+    st.caption(
+        "실제 회사 센서 라벨, 정비 이력, downtime/cost 로그가 있을 때만 실제 현장 성능과 비용 영향을 계산합니다. "
+        "일부 파일만 있으면 가능한 지표와 불가능한 주장을 분리해서 표시합니다."
+    )
+
+    st.markdown("#### 입력 파일")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        field_upload = st.file_uploader(
+            "1. labeled sensor CSV",
+            type=["csv"],
+            key="field_validation_sensor_csv",
+            help="equipment_id, timestamp, 센서값, actual_failure가 포함된 파일입니다.",
+        )
+    with col2:
+        maintenance_upload = st.file_uploader(
+            "2. 정비 이력 CSV",
+            type=["csv"],
+            key="field_validation_maintenance_csv",
+            help="work_order_id, 정비 시작/종료, 조치 유형을 담은 파일입니다. 현재 리포트에는 추적성 참고 정보로 표시합니다.",
+        )
+    with col3:
+        cost_upload = st.file_uploader(
+            "3. downtime/cost CSV",
+            type=["csv"],
+            key="field_validation_cost_csv",
+            help="downtime_minutes, parts_cost, labor_cost, lost_production_cost, baseline/new policy cost를 담은 파일입니다.",
+        )
+
+    template_col1, template_col2, template_col3, template_col4 = st.columns(4)
+    with template_col1:
+        if OPTIONAL_FILES["field_data_template"].exists():
+            st.download_button(
+                "센서 라벨 템플릿 다운로드",
+                data=OPTIONAL_FILES["field_data_template"].read_bytes(),
+                file_name="field_data_template.csv",
+                mime="text/csv",
+            )
+    with template_col2:
+        if OPTIONAL_FILES["field_maintenance_template"].exists():
+            st.download_button(
+                "정비 이력 템플릿 다운로드",
+                data=OPTIONAL_FILES["field_maintenance_template"].read_bytes(),
+                file_name="field_maintenance_template.csv",
+                mime="text/csv",
+            )
+    with template_col3:
+        if OPTIONAL_FILES["field_cost_template"].exists():
+            st.download_button(
+                "비용 로그 템플릿 다운로드",
+                data=OPTIONAL_FILES["field_cost_template"].read_bytes(),
+                file_name="field_cost_template.csv",
+                mime="text/csv",
+            )
+    with template_col4:
+        if OPTIONAL_FILES["field_validation_data_request_kit"].exists():
+            st.download_button(
+                "실증 데이터 요청 ZIP 다운로드",
+                data=OPTIONAL_FILES["field_validation_data_request_kit"].read_bytes(),
+                file_name="field_validation_data_request_kit.zip",
+                mime="application/zip",
+            )
+
+    if field_upload is None:
+        st.info("labeled sensor CSV를 업로드하면 성능 재평가 가능 여부를 확인합니다.")
+        return
+
+    if maintenance_upload is None:
+        st.warning("정비 이력 CSV가 없으면 작업지시 추적성은 제한적으로만 해석합니다.")
+    if cost_upload is None:
+        st.warning("downtime/cost CSV가 없으면 실제 비용 절감 또는 downtime 감소를 주장할 수 없습니다.")
+
+    if st.button("회사 데이터 실증 리포트 생성", type="primary"):
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = Path(temp_dir)
+                field_path = temp_path / "field_data.csv"
+                field_path.write_bytes(field_upload.getvalue())
+                maintenance_path = None
+                if maintenance_upload is not None:
+                    maintenance_path = temp_path / "maintenance_history.csv"
+                    maintenance_path.write_bytes(maintenance_upload.getvalue())
+                cost_path = None
+                if cost_upload is not None:
+                    cost_path = temp_path / "field_cost.csv"
+                    cost_path.write_bytes(cost_upload.getvalue())
+
+                from evaluate_field_validation_report import evaluate_field_validation_package
+
+                metrics = evaluate_field_validation_package(
+                    field_path,
+                    cost_path,
+                    OUTPUT_DIR,
+                    maintenance_data_path=maintenance_path,
+                )
+
+            st.success("회사 데이터 실증 리포트를 생성했습니다.")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                metric_card("Precision", str(metrics.get("precision")), "라벨 기준")
+            with col2:
+                metric_card("Recall", str(metrics.get("recall")), "라벨 기준")
+            with col3:
+                metric_card("Lead time", str(metrics.get("lead_time_minutes_mean")), "failure timestamp 필요")
+            with col4:
+                metric_card("Cost delta", str(metrics.get("maintenance_cost_delta_rate")), "before/after cost 필요")
+
+            claim_status = str(metrics.get("claim_status", ""))
+            if "cost" in claim_status and "not_supported" in claim_status:
+                st.warning("현재 입력만으로 실제 비용 절감 또는 downtime 감소는 주장할 수 없습니다.")
+            if claim_status == "field_validation_ready":
+                st.info("before/after 비용 필드가 포함되어 비용 영향 계산까지 가능합니다. 실제 주장 전에는 기간과 설비군 조건을 함께 명시하세요.")
+            if claim_status == "performance_and_traceability_only_cost_claim_not_supported":
+                st.info("정비 이력까지 업로드되어 추적성 검토는 가능하지만, downtime/cost CSV가 없어 비용 영향은 주장할 수 없습니다.")
+
+            report_path = Path(metrics["report_md"])
+            st.markdown("#### 생성 리포트")
+            st.markdown(report_path.read_text(encoding="utf-8"))
+            st.markdown("#### 리포트 내보내기")
+            export_columns = st.columns(4)
+            export_files = [
+                ("Markdown", Path(metrics["report_md"]), "field_validation_report.md", "text/markdown"),
+                ("CSV", Path(metrics["report_csv"]), "field_validation_report.csv", "text/csv"),
+                ("JSON", Path(metrics["report_json"]), "field_validation_report.json", "application/json"),
+                ("ZIP", Path(metrics["report_zip"]), "field_validation_report_bundle.zip", "application/zip"),
+            ]
+            for column, (label, path, file_name, mime) in zip(export_columns, export_files):
+                with column:
+                    st.download_button(
+                        f"{label} 다운로드",
+                        data=path.read_bytes(),
+                        file_name=file_name,
+                        mime=mime,
+                        key=f"field_validation_{file_name}",
+                    )
+        except Exception as error:
+            st.error("회사 데이터 실증 리포트 생성에 실패했습니다.")
+            st.exception(error)
+
+
+def render_real_company_retraining_form() -> None:
+    """Render the actual labeled company CSV retraining form."""
     uploaded_file = st.file_uploader(
-        "라벨이 있는 회사 CSV 업로드",
+        "실제 labeled company CSV 업로드",
         type=["csv"],
         key="company_retraining_csv",
         help="고장/불량 여부를 나타내는 target column이 포함된 CSV를 업로드합니다.",
     )
+
     if uploaded_file is None:
-        st.info("데모 검증은 AI4I 데이터를 회사 스키마처럼 바꾼 CSV로 수행됩니다.")
+        st.info("실제 labeled company CSV를 업로드하면 이 화면에서 성능 재검증을 실행합니다.")
         return
 
     try:
@@ -2032,21 +2384,20 @@ def render_artifact_downloads() -> None:
 
 def render_predictive_spc_tab(spc_summary: dict, spc_timeseries: pd.DataFrame) -> None:
     """Render the simulated time-series and Predictive SPC outputs."""
-    st.subheader("Predictive SPC 시간축 시뮬레이션")
+    st.subheader("위험 모니터링")
     st.caption(
-        "AI4I는 실제 실시간 센서 스트림이 아니므로 UDI 순서를 가상의 시간축으로 두고, "
-        "XGBoost 고장 확률을 risk signal로 사용한 발표용 SPC 시뮬레이션입니다."
+        "저장된 센서 row 순서를 시간축처럼 재구성해 고장 확률 추세, 관리한계, 고위험 구간을 확인합니다."
     )
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        metric_card("Simulated Rows", str(spc_summary["total_rows"]), "UDI 순서 time axis")
+        metric_card("Rows", str(spc_summary["total_rows"]), "monitoring records")
     with col2:
         metric_card("High Risk", str(spc_summary["high_risk_count"]), "threshold 이상")
     with col3:
         metric_card("SPC Alerts", str(spc_summary["spc_risk_alert_count"]), "risk limit or threshold")
     with col4:
-        metric_card("Risk UCL", f"{spc_summary['risk_ucl']:.4f}", "3-sigma control limit")
+        metric_card("Risk UCL", f"{spc_summary['risk_ucl']:.4f}", "3-sigma 관리한계")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -2058,16 +2409,16 @@ def render_predictive_spc_tab(spc_summary: dict, spc_timeseries: pd.DataFrame) -
     with col2:
         st.image(
             str(REQUIRED_FILES["spc_control_chart"]),
-            caption="Torque control chart as a SHAP-linked process signal",
+            caption="Torque control chart as a model-linked process signal",
             width="stretch",
         )
 
     st.markdown(
         """
         <div class="callout">
-        <strong>최종발표용 표현:</strong>
-        여기의 Time-Series는 실제 공장 스트리밍이 아니라 공개 데이터에 시간축을 부여한 시뮬레이션입니다.
-        따라서 논문에서는 "real-time deployment"가 아니라 "time-series playback 기반 Predictive SPC PoC"로 설명합니다.
+        <strong>데이터 범위:</strong>
+        이 화면은 운영망 실시간 스트림이 아니라 저장된 센서 row를 기반으로 위험 추세를 재구성합니다.
+        실제 설비 적용 전에는 설비별 센서 주기, 단위, 결측 처리, 관리한계를 현장 데이터로 다시 확인해야 합니다.
         </div>
         """,
         unsafe_allow_html=True,
@@ -2155,15 +2506,15 @@ def render_ai_report_tab(
     genai_settings: dict,
 ) -> None:
     """Render saved and optional live GenAI manager reports."""
-    st.subheader("GenAI 관리자 리포트 생성")
+    st.subheader("AI 리포트")
     st.caption(
-        "High Risk 또는 SPC 이상 row를 선택해 관리자 참고 리포트를 생성합니다. "
+        "고위험 또는 관리한계 이상 row를 선택해 관리자 참고 리포트를 생성합니다. "
         "API key는 왼쪽 사이드바에서 입력하며 파일에 저장하지 않습니다."
     )
     if genai_settings.get("has_key"):
-        st.success(f"GenAI 상태: {genai_status_text(genai_settings)}")
+        st.success(f"API 상태: {genai_status_text(genai_settings)}")
     else:
-        st.warning("GenAI 상태: API key 없음. 저장된 기본 리포트를 표시하고 새 API 호출은 비활성화합니다.")
+        st.warning("API key 없음: 저장된 기본 리포트를 표시하고 새 API 호출은 비활성화합니다.")
 
     candidate_rows = spc_timeseries[
         (spc_timeseries["risk_status"] == "High Risk") | spc_timeseries["spc_risk_alert"]
@@ -2175,7 +2526,7 @@ def render_ai_report_tab(
 
     row_options = candidate_rows["time_step"].astype(int).tolist()
     selected_time_step = st.selectbox(
-        "리포트 대상 row",
+        "리포트 대상 센서 row",
         options=row_options,
         format_func=lambda step: (
             f"time step {step} / UDI "
@@ -2228,7 +2579,7 @@ def render_ai_report_tab(
     st.dataframe(evidence_df, width="stretch", hide_index=True)
 
     if st.button(
-        "선택 row로 GenAI 리포트 생성",
+        "선택 row로 AI 리포트 생성",
         type="primary",
         disabled=not genai_settings.get("has_key"),
     ):
@@ -2376,10 +2727,10 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
     st.markdown("#### 센서 row 입력")
     st.caption(
         "단일 설비의 센서 값을 입력하면 로컬 예측 함수가 고장 확률과 High Risk 여부를 계산하고, "
-        "event, 작업지시 초안, 승인/검토/반려 기록을 SQLite와 CSV export에 저장합니다."
+        "센서 이벤트, 작업지시 초안, 승인/검토/반려 기록을 SQLite와 CSV export에 저장합니다."
     )
 
-    with st.expander("센서 row 입력 및 event 생성", expanded=True):
+    with st.expander("센서 row 입력 및 이벤트 생성", expanded=True):
         st.markdown("단일 설비 센서 row를 직접 입력하거나 아래 프리셋으로 빠르게 채울 수 있습니다.")
         preset_col1, preset_col2 = st.columns(2)
         with preset_col1:
@@ -2394,35 +2745,35 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
         with st.form("stage19_field_event_form"):
             col1, col2, col3 = st.columns(3)
             with col1:
-                equipment_id = st.text_input("Equipment ID", key="stage19_equipment_id")
+                equipment_id = st.text_input("설비 ID", key="stage19_equipment_id")
             with col2:
                 event_timestamp = st.text_input(
-                    "Event timestamp",
+                    "이벤트 시각",
                     key="stage19_event_timestamp",
                 )
             with col3:
-                source_system = st.text_input("Source system", key="stage19_source_system")
+                source_system = st.text_input("입력 출처", key="stage19_source_system")
 
             col1, col2, col3 = st.columns(3)
             with col1:
-                type_value = st.selectbox("Type", options=["L", "M", "H"], key="stage19_type")
-                air_temp = st.number_input("Air temperature [K]", step=0.1, key="stage19_air_temp")
+                type_value = st.selectbox("제품 등급", options=["L", "M", "H"], key="stage19_type")
+                air_temp = st.number_input("공기 온도 [K]", step=0.1, key="stage19_air_temp")
             with col2:
                 process_temp = st.number_input(
-                    "Process temperature [K]",
+                    "공정 온도 [K]",
                     step=0.1,
                     key="stage19_process_temp",
                 )
                 rotational_speed = st.number_input(
-                    "Rotational speed [rpm]",
+                    "회전 속도 [rpm]",
                     step=1,
                     key="stage19_rotational_speed",
                 )
             with col3:
-                torque = st.number_input("Torque [Nm]", step=0.1, key="stage19_torque")
-                tool_wear = st.number_input("Tool wear [min]", step=1, key="stage19_tool_wear")
+                torque = st.number_input("토크 [Nm]", step=0.1, key="stage19_torque")
+                tool_wear = st.number_input("공구 마모 [min]", step=1, key="stage19_tool_wear")
 
-            submitted = st.form_submit_button("field-event 생성", type="primary")
+            submitted = st.form_submit_button("센서 이벤트 생성", type="primary")
 
         if submitted:
             row = {
@@ -2451,7 +2802,7 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
                     {"source_system": source_system},
                     error_message=str(error),
                 )
-                st.error("field-event 생성 중 문제가 발생했습니다.")
+                st.error("센서 이벤트 생성 중 문제가 발생했습니다.")
                 st.exception(error)
             else:
                 record_audit(
@@ -2467,7 +2818,7 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
                     },
                 )
                 st.session_state["operations_last_message"] = (
-                    f"event 생성 완료: {event['event_id']} / {event['risk_status']}"
+                    f"센서 이벤트 생성 완료: {event['event_id'][:8]} / {event['risk_status']}"
                 )
                 st.rerun()
 
@@ -2475,11 +2826,11 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
     with col1:
         st.markdown("#### 작업지시 초안 생성")
         if not events:
-            st.info("먼저 field-event 또는 예측 event를 생성하세요.")
+            st.info("먼저 센서 이벤트 또는 예측 기록을 생성하세요.")
         else:
             event_map = {event["event_id"]: event for event in events}
             selected_event_id = st.selectbox(
-                "Draft를 만들 event",
+                "초안을 만들 센서 이벤트",
                 options=list(event_map),
                 format_func=lambda event_id: (
                     f"{event_map[event_id]['risk_status']} / "
@@ -2512,7 +2863,7 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
                         {"event_id": draft["event_id"]},
                     )
                     st.session_state["operations_last_message"] = (
-                        f"작업지시 초안 생성 완료: {draft['draft_id']}"
+                        f"작업지시 초안 생성 완료: {draft['draft_id'][:8]}"
                     )
                     st.rerun()
 
@@ -2523,7 +2874,7 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
         else:
             draft_map = {draft["draft_id"]: draft for draft in drafts}
             selected_draft_id = st.selectbox(
-                "결정할 draft",
+                "결정할 작업지시 초안",
                 options=list(draft_map),
                 format_func=lambda draft_id: (
                     f"{draft_map[draft_id]['created_at']} / {draft_id[:8]}"
@@ -2531,24 +2882,24 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
                 key="stage20_decision_draft_select",
             )
             decision = st.radio(
-                "Decision",
+                "결정",
                 options=["approve", "needs_review", "reject"],
                 horizontal=True,
                 key="stage20_decision_radio",
                 format_func=lambda value: {
-                    "approve": "승인 approve",
-                    "needs_review": "검토 필요 needs_review",
-                    "reject": "반려 reject",
+                    "approve": "승인 (approve)",
+                    "needs_review": "검토 필요 (needs_review)",
+                    "reject": "반려 (reject)",
                 }[value],
             )
             operator_id = st.text_input(
-                "Operator ID",
+                "작업자 ID",
                 value=current_actor().get("actor_id", "operator_01"),
                 key="stage20_operator_id",
             )
             note = st.text_area(
-                "Note",
-                value="Reviewed from the predictive maintenance dashboard.",
+                "메모",
+                value="대시보드에서 검토했습니다.",
                 key="stage20_decision_note",
             )
             if st.button("결정 기록 저장", key="save_stage20_decision"):
@@ -2586,7 +2937,7 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
                         },
                     )
                     st.session_state["operations_last_message"] = (
-                        f"decision 저장 완료: {saved['decision_id']} / {saved['decision']}"
+                        f"결정 저장 완료: {saved['decision_id'][:8]} / {saved['decision']}"
                     )
                     st.rerun()
 
@@ -2792,6 +3143,579 @@ def render_comparison_evidence() -> None:
             st.markdown(spc_summary)
 
 
+def render_industrial_engineering_evidence_tab() -> None:
+    """Show industrial-engineering theory links and generated evidence."""
+    st.subheader("산업공학 검증 근거")
+    st.caption(
+        "OEE/MTBF/MTTR, FMEA/RPN, SPC 관리한계, cost simulation, risk priority score를 논문용으로 연결합니다."
+    )
+
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "개념": "OEE",
+                    "수식": "OEE = Availability x Performance x Quality",
+                    "시스템 연결": "고위험 alert와 작업지시 이력을 Availability 관리 후보 지표로 연결",
+                    "주의": "AI4I만으로 실제 OEE 개선을 증명하지 않음",
+                },
+                {
+                    "개념": "MTBF",
+                    "수식": "MTBF = total operating time / number of failures",
+                    "시스템 연결": "고장 이력과 운영시간 로그가 있으면 신뢰성 지표로 확장 가능",
+                    "주의": "현장 운영시간 로그 없이는 개선 주장 불가",
+                },
+                {
+                    "개념": "MTTR",
+                    "수식": "MTTR = total repair time / number of repairs",
+                    "시스템 연결": "작업지시 승인/조치 이력과 수리시간 로그를 연결 가능",
+                    "주의": "수리시간 실측 없이는 단축 주장 불가",
+                },
+                {
+                    "개념": "FMEA/RPN",
+                    "수식": "RPN = Severity x Occurrence x Detection",
+                    "시스템 연결": "risk_priority_score를 FMEA-inspired priority로 설명",
+                    "주의": "공식 FMEA sheet 대체 아님",
+                },
+                {
+                    "개념": "SPC",
+                    "수식": "UCL/LCL = mean +/- 3 x sigma",
+                    "시스템 연결": "고장확률/센서 추세를 관리도 문맥으로 표시",
+                    "주의": "설비별 정상기간 데이터로 관리한계 재설정 필요",
+                },
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+
+    st.markdown("#### Risk priority score")
+    st.code(
+        "risk_priority_score = clip(\n"
+        "    72 * calibrated_probability\n"
+        "  + 14 * I(calibrated_probability >= policy_threshold)\n"
+        "  + 0.14 * (100 - quality_score)\n"
+        "  + 10 * clip(missed_failure_weight / max(false_alarm_weight, 0.1), 0, 30) / 30,\n"
+        "  0,\n"
+        "  100\n"
+        ")",
+        language="text",
+    )
+
+    if OPTIONAL_FILES["operating_policy_thresholds"].exists():
+        policy_payload = load_json(OPTIONAL_FILES["operating_policy_thresholds"])
+        policy_rows = [
+            {"policy": policy_id, **policy}
+            for policy_id, policy in policy_payload.get("policies", {}).items()
+        ]
+        if policy_rows:
+            st.markdown("#### 운영 정책 threshold")
+            st.dataframe(pd.DataFrame(policy_rows), width="stretch", hide_index=True)
+
+    if OPTIONAL_FILES["operational_value_comparison"].exists():
+        value_df = pd.read_csv(OPTIONAL_FILES["operational_value_comparison"])
+        st.markdown("#### Cost simulation")
+        st.dataframe(
+            value_df[
+                [
+                    "scenario_id",
+                    "policy_id",
+                    "alert_count",
+                    "false_alarm_count",
+                    "missed_failure_count",
+                    "normalized_operating_cost",
+                ]
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+
+    evidence_text = load_optional_markdown(OPTIONAL_FILES["industrial_engineering_evidence"])
+    if evidence_text:
+        st.markdown("#### 논문용 산업공학 근거 문서")
+        st.markdown(evidence_text)
+        st.download_button(
+            "industrial_engineering_evidence.md 다운로드",
+            data=evidence_text.encode("utf-8"),
+            file_name="industrial_engineering_evidence.md",
+            mime="text/markdown",
+        )
+    else:
+        st.info("`src\\create_industrial_engineering_evidence.py` 실행 후 근거 문서가 표시됩니다.")
+
+
+def render_open_industrial_validation_tab() -> None:
+    """Show optional open industrial dataset validation artifacts."""
+    st.subheader("공개 산업 데이터 검증")
+    st.caption(
+        "SCANIA Component X 같은 공개 산업 데이터셋을 연결해 실제 산업 데이터에 가까운 benchmark를 수행하는 화면입니다."
+    )
+
+    st.info(
+        "원본 공개 데이터는 용량과 라이선스 때문에 GitHub에 포함하지 않습니다. "
+        "`data_external/scania_component_x/`에 파일을 넣고 `src\\open_industrial_validation.py`를 실행하면 실제 공개 데이터 경로로 검증합니다."
+    )
+
+    public_metrics_path = OPTIONAL_FILES["public_industrial_validation_metrics"]
+    public_cost_path = OPTIONAL_FILES["public_industrial_cost_simulation"]
+    public_rul_path = OPTIONAL_FILES["public_industrial_rul_metrics"]
+    public_report = load_optional_markdown(OPTIONAL_FILES["public_industrial_validation_report"])
+    public_claims = load_optional_markdown(OPTIONAL_FILES["public_benchmark_claims"])
+    if public_metrics_path.exists():
+        public_df = pd.read_csv(public_metrics_path)
+        dataset_count = public_df["dataset_id"].nunique()
+        best_rows = (
+            public_df.sort_values(["dataset_id", "f1_score", "recall"], ascending=[True, False, False])
+            .groupby("dataset_id", as_index=False)
+            .head(1)
+        )
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            metric_card("Datasets", str(dataset_count), "MetroPT/C-MAPSS/IMS/FEMTO")
+        with col2:
+            metric_card("Best Avg F1", f"{best_rows['f1_score'].mean():.4f}", "best per dataset")
+        with col3:
+            metric_card("Best Avg Recall", f"{best_rows['recall'].mean():.4f}", "best per dataset")
+        with col4:
+            metric_card("Avg Lead Time", f"{best_rows['mean_lead_time_steps'].mean():.2f}", "steps")
+
+        st.markdown("#### Public benchmark adapter summary")
+        st.dataframe(
+            best_rows[
+                [
+                    "dataset_id",
+                    "source_mode",
+                    "label_scope",
+                    "display_name",
+                    "precision",
+                    "recall",
+                    "f1_score",
+                    "pr_auc",
+                    "early_warning_rate",
+                    "mean_lead_time_steps",
+                ]
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+
+        chart_cols = st.columns(3)
+        chart_specs = [
+            ("public_industrial_lead_time_chart", "Public benchmark lead-time summary"),
+            ("public_industrial_cost_chart", "Public benchmark simulated cost summary"),
+            ("public_industrial_rul_chart", "Public benchmark RUL error summary"),
+        ]
+        for column, (file_key, caption) in zip(chart_cols, chart_specs):
+            with column:
+                if OPTIONAL_FILES[file_key].exists():
+                    st.image(str(OPTIONAL_FILES[file_key]), caption=caption, width="stretch")
+
+        if public_cost_path.exists():
+            public_cost_df = pd.read_csv(public_cost_path)
+            st.markdown("#### Public benchmark simulated cost")
+            st.dataframe(
+                public_cost_df[
+                    [
+                        "dataset_id",
+                        "scenario_id",
+                        "display_name",
+                        "normalized_operating_cost",
+                        "simulated_cost_delta_vs_no_alert",
+                        "cost_scope",
+                    ]
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+
+        if public_rul_path.exists():
+            public_rul_df = pd.read_csv(public_rul_path)
+            st.markdown("#### RUL benchmark metrics")
+            st.dataframe(
+                public_rul_df[
+                    [
+                        "dataset_id",
+                        "source_mode",
+                        "display_name",
+                        "rmse",
+                        "mae",
+                        "nasa_style_rul_score",
+                        "rul_scope",
+                    ]
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+
+        if OPTIONAL_FILES["public_industrial_confusion_matrix"].exists():
+            st.image(
+                str(OPTIONAL_FILES["public_industrial_confusion_matrix"]),
+                caption="Representative public benchmark confusion matrix",
+                width="stretch",
+            )
+
+        if public_report:
+            with st.expander("Public industrial benchmark report"):
+                st.markdown(public_report)
+        if public_claims:
+            with st.expander("Public benchmark claims and guardrails"):
+                st.markdown(public_claims)
+    else:
+        st.info("Public benchmark summary is shown after running `src\\public_industrial_benchmark.py`.")
+
+    official_metrics_path = OPTIONAL_FILES["scania_official_cost_metrics"]
+    official_report = load_optional_markdown(OPTIONAL_FILES["scania_official_cost_report"])
+    if official_metrics_path.exists():
+        official_df = pd.read_csv(official_metrics_path)
+        best_cost = official_df.sort_values("official_cost", ascending=True).iloc[0]
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            metric_card("Best Official Cost", f"{best_cost['official_cost']:.0f}", best_cost["strategy_id"])
+        with col2:
+            metric_card(
+                "Rule 대비 개선",
+                f"{float(best_cost['cost_improvement_vs_rule']) * 100:.2f}%",
+                "official cost metric",
+            )
+        with col3:
+            metric_card(
+                "No-alert 대비 개선",
+                f"{float(best_cost['cost_improvement_vs_no_alert']) * 100:.2f}%",
+                "official cost metric",
+            )
+        with col4:
+            metric_card(
+                "Alert-like Rate",
+                f"{float(best_cost['alert_like_rate']) * 100:.2f}%",
+                "점검/경보 부담",
+            )
+
+        st.markdown("#### SCANIA official class 0~4 cost metric")
+        official_columns = [
+            "strategy_id",
+            "official_cost",
+            "normalized_cost",
+            "cost_improvement_vs_rule",
+            "cost_improvement_vs_no_alert",
+            "alert_like_rate",
+            "macro_f1",
+            "balanced_accuracy",
+            "recall_class_0",
+            "recall_class_4",
+        ]
+        st.dataframe(official_df[official_columns], width="stretch", hide_index=True)
+        st.warning(
+            "이 수치는 SCANIA 공개 benchmark의 official cost metric 개선율입니다. "
+            "실제 사업장 원화 비용 절감이나 탐지 시간 단축 실증은 별도 현장 로그가 필요합니다."
+        )
+    else:
+        st.info("SCANIA official class 0~4 cost metric 산출물은 `src\\scania_official_cost_validation.py` 실행 후 표시됩니다.")
+
+    chart_col1, chart_col2 = st.columns(2)
+    with chart_col1:
+        if OPTIONAL_FILES["scania_official_cost_chart"].exists():
+            st.image(
+                str(OPTIONAL_FILES["scania_official_cost_chart"]),
+                caption="SCANIA official cost comparison",
+                width="stretch",
+            )
+    with chart_col2:
+        if OPTIONAL_FILES["scania_official_confusion_matrix"].exists():
+            st.image(
+                str(OPTIONAL_FILES["scania_official_confusion_matrix"]),
+                caption="Best official-cost strategy confusion matrix",
+                width="stretch",
+            )
+    if official_report:
+        with st.expander("SCANIA official cost metric 리포트"):
+            st.markdown(official_report)
+
+    render_field_validation_workbench()
+
+    field_protocol = load_optional_markdown(OPTIONAL_FILES["field_validation_protocol"])
+    if field_protocol:
+        with st.expander("실제 현장 실증 프로토콜과 템플릿"):
+            st.info(
+                "실제 비용 절감률이나 탐지 시간 단축률을 주장하려면 센서값뿐 아니라 "
+                "고장 라벨, 정비 시작/종료, downtime, 부품비, 인건비 로그가 함께 필요합니다."
+            )
+            field_cols = st.columns(4)
+            with field_cols[0]:
+                metric_card("필수 데이터", "센서 + 고장 라벨", "설비 ID와 timestamp 포함")
+            with field_cols[1]:
+                metric_card("필수 이력", "정비 시작/종료", "lead time 계산")
+            with field_cols[2]:
+                metric_card("필수 비용", "부품비 + 인건비", "cost simulation 보정")
+            with field_cols[3]:
+                metric_card("주장 범위", "before/after 비교", "현장 로그 있을 때만")
+            st.markdown(field_protocol)
+            col1, col2 = st.columns(2)
+            with col1:
+                if OPTIONAL_FILES["field_data_template"].exists():
+                    st.caption("센서/고장 라벨 템플릿 미리보기")
+                    st.dataframe(
+                        pd.read_csv(OPTIONAL_FILES["field_data_template"]).head(5),
+                        width="stretch",
+                        hide_index=True,
+                    )
+                    st.download_button(
+                        "현장 센서/고장 라벨 템플릿 다운로드",
+                        data=OPTIONAL_FILES["field_data_template"].read_bytes(),
+                        file_name="field_data_template.csv",
+                        mime="text/csv",
+                    )
+            with col2:
+                if OPTIONAL_FILES["field_cost_template"].exists():
+                    st.caption("정비 비용 로그 템플릿 미리보기")
+                    st.dataframe(
+                        pd.read_csv(OPTIONAL_FILES["field_cost_template"]).head(5),
+                        width="stretch",
+                        hide_index=True,
+                    )
+                    st.download_button(
+                        "현장 비용 로그 템플릿 다운로드",
+                        data=OPTIONAL_FILES["field_cost_template"].read_bytes(),
+                        file_name="field_cost_template.csv",
+                        mime="text/csv",
+                    )
+
+    metrics_path = OPTIONAL_FILES["open_industrial_validation_metrics"]
+    cost_path = OPTIONAL_FILES["open_industrial_cost_simulation"]
+    report_text = load_optional_markdown(OPTIONAL_FILES["open_industrial_validation_report"])
+    lead_text = load_optional_markdown(OPTIONAL_FILES["open_industrial_lead_time_report"])
+
+    if metrics_path.exists():
+        metrics_df = pd.read_csv(metrics_path)
+        source_mode = str(metrics_df["source_mode"].iloc[0]) if "source_mode" in metrics_df else "unknown"
+        best_f1 = metrics_df.sort_values(["f1_score", "recall"], ascending=[False, False]).iloc[0]
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            metric_card("Source", source_mode, "sample or public data")
+        with col2:
+            metric_card("Best F1", f"{best_f1['f1_score']:.4f}", best_f1["display_name"])
+        with col3:
+            metric_card("Recall", f"{best_f1['recall']:.4f}", "best F1 strategy")
+        with col4:
+            metric_card("PR-AUC", f"{best_f1['pr_auc']:.4f}", "best F1 strategy")
+
+        display_columns = [
+            "display_name",
+            "precision",
+            "recall",
+            "f1_score",
+            "pr_auc",
+            "alert_count",
+            "false_alarm_count",
+            "missed_failure_count",
+            "early_warning_rate",
+            "mean_lead_time_steps",
+        ]
+        st.markdown("#### 공개 산업 데이터 비교군 성능")
+        st.dataframe(metrics_df[display_columns], width="stretch", hide_index=True)
+    else:
+        st.warning("공개 산업 데이터 검증 산출물이 아직 없습니다. `src\\open_industrial_validation.py`를 실행하세요.")
+
+    if OPTIONAL_FILES["open_industrial_lead_time_chart"].exists():
+        st.image(
+            str(OPTIONAL_FILES["open_industrial_lead_time_chart"]),
+            caption="Open industrial validation lead-time comparison",
+            width="stretch",
+        )
+
+    if cost_path.exists():
+        cost_df = pd.read_csv(cost_path)
+        st.markdown("#### 공개 산업 데이터 cost simulation")
+        st.dataframe(
+            cost_df[
+                [
+                    "strategy_id",
+                    "operating_cost_units",
+                    "normalized_operating_cost",
+                    "simulated_cost_delta_vs_no_alert",
+                    "cost_scope",
+                ]
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+
+    if report_text:
+        with st.expander("Open industrial validation report"):
+            st.markdown(report_text)
+    if lead_text:
+        with st.expander("Lead-time report"):
+            st.markdown(lead_text)
+
+
+def render_field_validation_workbench() -> None:
+    """Generate a company field-validation report from uploaded labeled logs."""
+    st.markdown("### 실제 회사 데이터 실증 리포트")
+    st.caption(
+        "센서/고장 라벨 CSV와 정비 비용 로그 CSV를 함께 넣으면 precision, recall, false alarm, missed failure, "
+        "lead time, downtime, cost delta를 계산합니다. 업로드 원본은 저장하지 않고 결과 리포트만 저장합니다."
+    )
+
+    top_cols = st.columns(4)
+    with top_cols[0]:
+        metric_card("입력 1", "센서 + 고장 라벨", "actual_failure 필수")
+    with top_cols[1]:
+        metric_card("입력 2", "정비 비용 로그", "downtime/cost 필수")
+    with top_cols[2]:
+        metric_card("출력", "실증 리포트", "CSV/JSON/MD")
+    with top_cols[3]:
+        metric_card("주장", "로그 있을 때만", "실제 절감률 분리")
+
+    st.info(
+        "`baseline_total_cost`와 `new_policy_total_cost`가 비용 로그에 있으면 cost delta를 계산합니다. "
+        "해당 컬럼이 없으면 비용 절감 실증이 아니라 예측/추적성 리포트로만 표시합니다."
+    )
+
+    demo_col, upload_col = st.columns([1, 2])
+    with demo_col:
+        st.markdown("#### 템플릿 샘플 실행")
+        st.write("템플릿으로 리포트 생성 기능만 확인합니다. 실제 회사 데이터 실증으로 표현하지 않습니다.")
+        if st.button("템플릿 샘플 리포트 생성", type="secondary"):
+            try:
+                from evaluate_field_validation_report import evaluate_field_validation
+
+                metrics = evaluate_field_validation(
+                    OPTIONAL_FILES["field_data_template"],
+                    OPTIONAL_FILES["field_cost_template"],
+                    OUTPUT_DIR,
+                    source_mode_override="template_demo",
+                )
+                record_audit(
+                    "field_validation.sample_report",
+                    "success",
+                    "field_validation",
+                    "template_demo",
+                    {"claim_status": metrics.get("claim_status")},
+                )
+                st.success("템플릿 샘플 리포트를 생성했습니다.")
+                st.rerun()
+            except Exception as error:
+                record_audit(
+                    "field_validation.sample_report",
+                    "error",
+                    "field_validation",
+                    "template_demo",
+                    error_message=str(error),
+                )
+                st.error(f"템플릿 샘플 리포트 생성 실패: {error}")
+
+    with upload_col:
+        st.markdown("#### 실제 labeled company CSV + 비용 로그")
+        field_upload = st.file_uploader(
+            "센서/고장 라벨 CSV 업로드",
+            type=["csv"],
+            key="field_validation_field_upload",
+            help="equipment_id, timestamp, 센서값, actual_failure, 선택적으로 failure_timestamp가 필요합니다.",
+        )
+        cost_upload = st.file_uploader(
+            "정비 비용 로그 CSV 업로드",
+            type=["csv"],
+            key="field_validation_cost_upload",
+            help="work_order_id, downtime_minutes, parts_cost, labor_cost, lost_production_cost 등이 필요합니다.",
+        )
+        if field_upload and cost_upload:
+            preview_cols = st.columns(2)
+            with preview_cols[0]:
+                st.caption("센서/고장 라벨 미리보기")
+                try:
+                    st.dataframe(pd.read_csv(field_upload).head(5), width="stretch", hide_index=True)
+                    field_upload.seek(0)
+                except Exception as error:
+                    st.error(f"센서 CSV 미리보기 실패: {error}")
+            with preview_cols[1]:
+                st.caption("정비 비용 로그 미리보기")
+                try:
+                    st.dataframe(pd.read_csv(cost_upload).head(5), width="stretch", hide_index=True)
+                    cost_upload.seek(0)
+                except Exception as error:
+                    st.error(f"비용 CSV 미리보기 실패: {error}")
+
+            if st.button("실제 회사 로그로 실증 리포트 생성", type="primary"):
+                try:
+                    from evaluate_field_validation_report import evaluate_field_validation
+
+                    with tempfile.TemporaryDirectory() as tmp_dir:
+                        tmp_path = Path(tmp_dir)
+                        field_path = tmp_path / "field_data.csv"
+                        cost_path = tmp_path / "field_cost.csv"
+                        field_path.write_bytes(field_upload.getvalue())
+                        cost_path.write_bytes(cost_upload.getvalue())
+                        metrics = evaluate_field_validation(
+                            field_path,
+                            cost_path,
+                            OUTPUT_DIR,
+                            source_mode_override="company_field_logs",
+                        )
+                    record_audit(
+                        "field_validation.company_report",
+                        "success",
+                        "field_validation",
+                        "company_field_logs",
+                        {
+                            "field_data_rows": metrics.get("field_data_rows"),
+                            "cost_rows": metrics.get("cost_rows"),
+                            "claim_status": metrics.get("claim_status"),
+                        },
+                    )
+                    st.success("실제 회사 로그 기반 실증 리포트를 생성했습니다. 원본 업로드 파일은 저장하지 않았습니다.")
+                    st.rerun()
+                except Exception as error:
+                    record_audit(
+                        "field_validation.company_report",
+                        "error",
+                        "field_validation",
+                        "company_field_logs",
+                        error_message=str(error),
+                    )
+                    st.error(f"실증 리포트 생성 실패: {error}")
+        else:
+            st.warning("두 CSV를 모두 업로드해야 실제 회사 로그 기반 리포트를 생성할 수 있습니다.")
+
+    report_path = OPTIONAL_FILES["field_validation_report"]
+    report_text = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
+    report_json_path = OPTIONAL_FILES["field_validation_report_json"]
+    if report_text:
+        st.divider()
+        st.markdown("#### 최근 생성된 실증 리포트")
+        if report_json_path.exists():
+            try:
+                report_meta = json.loads(report_json_path.read_text(encoding="utf-8"))
+                cols = st.columns(4)
+                with cols[0]:
+                    metric_card("source_mode", str(report_meta.get("source_mode")), "template or company logs")
+                with cols[1]:
+                    metric_card("claim_status", str(report_meta.get("claim_status")), "claim guardrail")
+                with cols[2]:
+                    metric_card("recall", str(report_meta.get("recall")), "failure capture")
+                with cols[3]:
+                    metric_card("cost_delta", str(report_meta.get("maintenance_cost_delta_rate")), "direct cost fields only")
+            except Exception:
+                pass
+        if OPTIONAL_FILES["field_validation_report_csv"].exists():
+            st.dataframe(
+                pd.read_csv(OPTIONAL_FILES["field_validation_report_csv"]),
+                width="stretch",
+                hide_index=True,
+            )
+            st.download_button(
+                "실증 리포트 CSV 다운로드",
+                data=OPTIONAL_FILES["field_validation_report_csv"].read_bytes(),
+                file_name="field_validation_report.csv",
+                mime="text/csv",
+            )
+        st.download_button(
+            "실증 리포트 Markdown 다운로드",
+            data=report_text.encode("utf-8"),
+            file_name="field_validation_report.md",
+            mime="text/markdown",
+        )
+        with st.expander("실증 리포트 본문"):
+            st.markdown(report_text)
+
 def render_thesis_evidence_tab() -> None:
     """Show thesis evidence artifacts only in the admin console."""
     st.subheader("논문 검증 근거")
@@ -2800,6 +3724,11 @@ def render_thesis_evidence_tab() -> None:
     )
 
     render_comparison_evidence()
+
+    industrial_evidence = load_optional_markdown(OPTIONAL_FILES["industrial_engineering_evidence"])
+    if industrial_evidence:
+        with st.expander("산업공학 검증 근거 요약"):
+            st.markdown(industrial_evidence)
 
     st.markdown("#### 운영 가치 시뮬레이션")
     if OPTIONAL_FILES["operational_value_comparison"].exists():
@@ -3188,7 +4117,11 @@ def main() -> None:
             "Stage 15~20 로컬 통합",
             "Stage 19~20 운영 설계",
             "최종 단계 로드맵",
+            "산업공학 검증 근거",
+            "공개 산업 데이터 검증",
             "논문 검증 근거",
+            "회사 데이터 실증",
+            "로컬 발표/논문 노트",
         ]
     )
 
@@ -3250,7 +4183,15 @@ def main() -> None:
     with tabs[21]:
         render_markdown_tab("최종 단계 로드맵", final_roadmap)
     with tabs[22]:
+        render_industrial_engineering_evidence_tab()
+    with tabs[23]:
+        render_open_industrial_validation_tab()
+    with tabs[24]:
         render_thesis_evidence_tab()
+    with tabs[25]:
+        render_field_validation_evidence_tab()
+    with tabs[26]:
+        render_local_notes_tab()
 
 
 USER_REQUIRED_FILE_KEYS = (
@@ -3285,33 +4226,34 @@ def render_start_tab(
     ai_context: dict,
 ) -> None:
     """Render the product-style first screen for operators and reviewers."""
-    xgboost = metrics["models"]["xgboost"]
     selected_threshold = float(threshold_summary["selected_threshold"])
     high_risk_count = int((predictions["xgboost_probability"] >= selected_threshold).sum())
     report_mode = str(ai_context.get("report_generation_mode", "not generated"))
+    report_status, report_note = summarize_report_mode(report_mode)
+    actor = current_actor()
 
-    st.subheader("시작하기")
-    st.caption("센서 CSV를 넣으면 예측, 그래프, 리포트, 승인형 작업지시 흐름을 순서대로 확인할 수 있습니다.")
+    st.subheader("홈")
+    st.caption("센서 CSV 업로드부터 위험 확인, AI 리포트, 작업지시 기록까지 한 화면 흐름으로 시작합니다.")
 
     step_col1, step_col2, step_col3, step_col4 = st.columns(4)
     with step_col1:
-        metric_card("1. 데이터 준비", "CSV", "샘플 파일 제공")
+        metric_card("CSV 업로드", "1", "샘플 파일 제공")
     with step_col2:
-        metric_card("2. 예측 실행", "자동", "확률·High Risk")
+        metric_card("고위험 설비 확인", "2", "확률·High Risk")
     with step_col3:
-        metric_card("3. 그래프 확인", "SPC", "추세·관리한계")
+        metric_card("AI 리포트 생성", "3", "API key 선택")
     with step_col4:
-        metric_card("4. 조치 기록", "승인형", "approve/review/reject")
+        metric_card("작업지시 승인", "4", "승인·검토·반려")
 
     st.markdown("#### 입력하면 나오는 것")
     st.dataframe(
         pd.DataFrame(
             [
-                {"출력": "고장 확률", "설명": "각 row의 XGBoost failure probability"},
-                {"출력": "High Risk 판정", "설명": f"선택 threshold {selected_threshold:.2f} 기준"},
-                {"출력": "그래프", "설명": "업로드 row 확률 bar chart, SPC trend/control chart, SHAP 요인"},
-                {"출력": "GenAI 리포트", "설명": "API key가 있으면 Gemini/OpenAI 관리자 참고 리포트 생성"},
-                {"출력": "작업지시 이력", "설명": "field-event, draft, approve/reject/needs_review 기록"},
+                {"출력": "고장 확률", "설명": "각 센서 row의 고장 가능성을 확률로 표시"},
+                {"출력": "High Risk 판정", "설명": f"위험 판정 기준 {selected_threshold:.2f} 적용"},
+                {"출력": "위험 그래프", "설명": "업로드 row 확률 그래프와 관리한계 기반 위험 추세"},
+                {"출력": "AI 리포트", "설명": "API key가 있으면 Gemini/OpenAI 기반 관리자 참고 리포트 생성"},
+                {"출력": "작업지시 이력", "설명": "센서 이벤트, 초안, 승인/검토/반려 기록"},
             ]
         ),
         width="stretch",
@@ -3320,19 +4262,30 @@ def render_start_tab(
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        metric_card("Best Model", "XGBoost", f"PR-AUC {xgboost['pr_auc']:.4f}")
+        metric_card("기준 모델", "XGBoost", "상세 성능은 Admin에서 확인")
     with col2:
-        metric_card("Threshold", f"{selected_threshold:.2f}", "F1-score 기준")
+        metric_card("위험 판정 기준", f"{selected_threshold:.2f}", "운영 정책에서 조정 가능")
     with col3:
-        metric_card("High Risk Rows", str(high_risk_count), f"test rows {len(predictions)}")
+        metric_card("고위험 건수", str(high_risk_count), "기준 데이터에서 확인")
     with col4:
-        metric_card("GenAI Mode", report_mode.split(":")[0], report_mode)
+        metric_card("AI 리포트 상태", report_status, report_note)
+
+    st.markdown("#### 운영 준비 상태")
+    status_col1, status_col2, status_col3, status_col4 = st.columns(4)
+    with status_col1:
+        metric_card("로그인", actor.get("role", "unknown"), actor.get("actor_id", "unknown"))
+    with status_col2:
+        metric_card("운영 DB 상태", "정상" if OPERATIONS_DB_PATH.exists() else "확인 필요", OPERATIONS_DB_PATH.name)
+    with status_col3:
+        metric_card("감사 로그 상태", "활성", "로그인·예측·작업지시")
+    with status_col4:
+        metric_card("API key", "세션 한정", "파일 저장 없음")
 
     col1, col2 = st.columns(2)
     with col1:
-        st.image(str(REQUIRED_FILES["spc_risk_chart"]), caption="Predictive SPC risk trend", width="stretch")
+        st.image(str(REQUIRED_FILES["spc_risk_chart"]), caption="고장 확률 추세", width="stretch")
     with col2:
-        st.image(str(REQUIRED_FILES["shap_bar"]), caption="SHAP feature importance", width="stretch")
+        st.image(str(REQUIRED_FILES["shap_bar"]), caption="위험요인 중요도", width="stretch")
 
     st.download_button(
         "샘플 센서 CSV 다운로드",
@@ -3340,6 +4293,16 @@ def render_start_tab(
         file_name="sample_field_sensor_rows.csv",
         mime="text/csv",
     )
+
+    with st.expander("사용 전 확인사항"):
+        st.markdown(
+            """
+            - 실제 설비에 적용하기 전에는 설비별 센서 주기, 단위, 결측 처리 기준을 확인해야 합니다.
+            - 회사 데이터로 성능을 다시 평가하려면 고장 여부가 포함된 labeled CSV가 필요합니다.
+            - 이 앱은 사람이 승인하는 작업지시 흐름을 지원하며, 무인 자동 정비 명령을 실행하지 않습니다.
+            - API key와 업로드 원본 데이터는 파일로 저장하지 않고 현재 세션 처리에만 사용합니다.
+            """
+        )
 
 
 def render_product_summary_tab(metrics: dict, threshold_summary: dict) -> None:
@@ -3376,23 +4339,94 @@ def render_scope_tab() -> None:
     st.subheader("적용 범위")
     st.markdown(
         """
-        이 앱은 센서 CSV 기반 예지보전 의사결정을 체험하고 검증하기 위한 제품형 MVP입니다.
+        이 앱은 센서 CSV 기반 예지보전 의사결정을 지원하는 로컬 운영형 애플리케이션입니다.
 
         - 지원 입력: AI4I-compatible 센서 CSV 또는 화면 직접 입력 row
-        - 지원 출력: 고장 확률, High Risk 판정, SPC 그래프, SHAP 요인, GenAI 관리자 참고 리포트, 승인형 작업지시 이력
+        - 지원 출력: 고장 확률, High Risk 판정, 위험 모니터링 그래프, 위험요인, AI 관리자 참고 리포트, 승인형 작업지시 이력
         - 저장 이력: 로컬 SQLite와 CSV export
-        - GenAI key: 현재 Streamlit 세션에서만 사용하며 파일에 저장하지 않음
+        - AI API key: 현재 Streamlit 세션에서만 사용하며 파일에 저장하지 않음
 
         아직 포함하지 않는 범위:
 
         - 실제 PLC/SCADA 운영망 연결 완료
         - 실제 공장 센서 스트림 운영 배포
         - 무인 자동 정비 명령 실행
-        - 상용 SaaS 수준의 SSO/RBAC, 외부 운영 DB, 보안 감사, 장애 대응 체계
+        - 상용 SaaS 수준의 OAuth/SSO/MFA, 외부 운영 DB, 보안 감사, 장애 대응 체계
         - 현장 회사 데이터 기반 성능 실증 수치
         """
     )
-    st.markdown("#### 논문에서 가능한 주장")
+
+    st.markdown("#### 현재 반영된 운영 기능")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "영역": "로그인/역할",
+                    "반영 상태": "Operator 앱과 Admin 콘솔 분리",
+                    "한계": "기업용 OAuth/SSO/MFA는 별도 범위",
+                },
+                {
+                    "영역": "감사 로그",
+                    "반영 상태": "로그인, CSV 예측, AI 리포트 시도, 센서 이벤트, 작업지시 결정 기록",
+                    "한계": "외부 보안 감사 시스템 연동은 별도 범위",
+                },
+                {
+                    "영역": "운영 DB",
+                    "반영 상태": "SQLite에 event, draft, decision, audit log 저장",
+                    "한계": "PostgreSQL/RDS/Supabase 운영 DB는 계정 정보 필요",
+                },
+                {
+                    "영역": "작업지시",
+                    "반영 상태": "승인, 검토 필요, 반려 결정과 재학습 후보 표시",
+                    "한계": "CMMS/EAM 자동 연동과 자동 정비 명령은 제외",
+                },
+                {
+                    "영역": "입력 데이터",
+                    "반영 상태": "컬럼 자동 매핑, 단위 변환, 결측/이상값/중복 진단",
+                    "한계": "실제 회사 성능 검증은 labeled company CSV 필요",
+                },
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+
+    st.markdown("#### 산업공학 지표 연결")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "개념": "OEE",
+                    "앱에서의 연결": "고위험 설비 조기 확인을 통해 Availability 관리와 연결 가능",
+                    "주의": "현재 데이터만으로 실제 OEE 개선을 실증하지 않음",
+                },
+                {
+                    "개념": "MTBF / MTTR",
+                    "앱에서의 연결": "고장 위험 이벤트와 작업지시 이력을 축적하면 향후 평균고장간격/평균수리시간 분석 가능",
+                    "주의": "실제 수리 시작/종료 로그가 필요",
+                },
+                {
+                    "개념": "FMEA / RPN",
+                    "앱에서의 연결": "risk_priority_score를 Severity, Occurrence, Detection 관점으로 해석 가능",
+                    "주의": "표준 FMEA 점수를 대체하지 않는 FMEA-inspired 우선순위",
+                },
+                {
+                    "개념": "SPC 관리한계",
+                    "앱에서의 연결": "고장 확률과 주요 센서 신호를 UCL 중심으로 모니터링",
+                    "주의": "현장 정상 기간 데이터로 관리한계를 다시 설정해야 함",
+                },
+                {
+                    "개념": "Cost simulation",
+                    "앱에서의 연결": "false alarm, missed failure, alert 처리에 상대 가중치를 둔 정책 비교",
+                    "주의": "실제 비용 절감 실증이 아니라 normalized simulation",
+                },
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+
+    st.markdown("#### 검증된 범위와 금지 표현")
     st.dataframe(
         pd.DataFrame(
             [
@@ -3402,7 +4436,7 @@ def render_scope_tab() -> None:
                 },
                 {
                     "구분": "가능",
-                    "표현": "SHAP/GenAI 설명과 승인형 작업지시 workflow를 하나의 제품형 MVP로 연결했다.",
+                    "표현": "SHAP/AI 리포트 설명과 승인형 작업지시 workflow를 하나의 흐름으로 연결했다.",
                 },
                 {
                     "구분": "가능",
@@ -3417,13 +4451,13 @@ def render_scope_tab() -> None:
         width="stretch",
         hide_index=True,
     )
-    st.info("세부 비교표와 논문 evidence pack은 사용자 앱이 아니라 Admin 콘솔의 `논문 검증 근거` 탭에서 확인합니다.")
+    st.info("세부 비교표와 연구 근거 자료는 사용자 앱이 아니라 Admin 콘솔에서 확인합니다.")
 
 
 def render_work_order_tab(ai_context: dict) -> None:
     """Render product-style field event and work-order workflow."""
     st.subheader("작업지시")
-    st.caption("센서 row 입력부터 event 생성, 작업지시 초안, 승인/검토/반려 기록까지 한 흐름으로 관리합니다.")
+    st.caption("센서 row 입력부터 이벤트 생성, 작업지시 초안, 승인/검토/반려 기록까지 한 흐름으로 관리합니다.")
 
     if OPERATIONS_DB_PATH.exists():
         events = list_prediction_events(limit=25, db_path=OPERATIONS_DB_PATH)
@@ -3436,20 +4470,21 @@ def render_work_order_tab(ai_context: dict) -> None:
 
     field_events = [event for event in events if str(event.get("source", "")).startswith("field_event:")]
     report_mode = str(ai_context.get("report_generation_mode", "not generated"))
+    report_status, report_note = summarize_report_mode(report_mode)
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        metric_card("GenAI Report", report_mode.split(":")[0], report_mode)
+        metric_card("AI 리포트 상태", report_status, report_note)
     with col2:
-        metric_card("Field Events", str(len(field_events)), "sensor event")
+        metric_card("센서 이벤트", str(len(field_events)), "저장 기록")
     with col3:
-        metric_card("Drafts", str(len(drafts)), "human approval")
+        metric_card("작업지시 초안", str(len(drafts)), "승인 대기")
     with col4:
-        metric_card("Decisions", str(len(decisions)), "approval log")
+        metric_card("결정 이력", str(len(decisions)), "승인·검토·반려")
 
     render_stage19_20_input_controls(events, drafts)
 
-    st.markdown("#### 최근 event")
+    st.markdown("#### 최근 센서 이벤트")
     if events:
         event_rows = []
         for event in events:
@@ -3457,39 +4492,83 @@ def render_work_order_tab(ai_context: dict) -> None:
             event_input = event.get("input", {})
             event_rows.append(
                 {
-                    "created_at": event["created_at"],
-                    "source": event["source"],
-                    "equipment_id": event_input.get("equipment_id", ""),
-                    "event_timestamp": event_input.get("event_timestamp", ""),
-                    "event_id": event["event_id"],
-                    "probability": event["probability"],
-                    "threshold": event["threshold"],
-                    "risk_status": event["risk_status"],
-                    "top_factor": top_factor,
+                    "생성 시각": event["created_at"],
+                    "설비 ID": event_input.get("equipment_id", ""),
+                    "이벤트 시각": event_input.get("event_timestamp", ""),
+                    "이벤트": event["event_id"][:8],
+                    "고장 확률": event["probability"],
+                    "위험 기준": event["threshold"],
+                    "위험 상태": event["risk_status"],
+                    "주요 요인": top_factor,
                 }
             )
         st.dataframe(pd.DataFrame(event_rows), width="stretch", hide_index=True)
+        with st.expander("센서 이벤트 상세 ID 보기"):
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "event_id": event["event_id"],
+                            "source": event["source"],
+                            "equipment_id": event.get("input", {}).get("equipment_id", ""),
+                        }
+                        for event in events
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
     else:
-        st.info("아직 저장된 예측 event가 없습니다.")
+        st.info("아직 저장된 센서 이벤트가 없습니다.")
 
     st.markdown("#### 최근 작업지시 초안")
     if drafts:
         draft_rows = [
             {
-                "created_at": draft["created_at"],
-                "draft_id": draft["draft_id"],
-                "event_id": draft["event_id"],
-                "requires_human_approval": draft["draft_json"].get("requires_human_approval"),
-                "draft_path": draft["draft_path"],
+                "생성 시각": draft["created_at"],
+                "초안": draft["draft_id"][:8],
+                "센서 이벤트": draft["event_id"][:8],
+                "사람 승인 필요": draft["draft_json"].get("requires_human_approval"),
             }
             for draft in drafts
         ]
         st.dataframe(pd.DataFrame(draft_rows), width="stretch", hide_index=True)
+        with st.expander("작업지시 초안 상세 ID 보기"):
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "draft_id": draft["draft_id"],
+                            "event_id": draft["event_id"],
+                            "draft_path": draft["draft_path"],
+                        }
+                        for draft in drafts
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
     else:
         st.info("아직 생성된 작업지시 초안이 없습니다.")
 
     st.markdown("#### 최근 승인/검토/반려 기록")
     if decisions:
+        def safe_operator_note(value: str) -> str:
+            """Keep product UI free from internal project wording in old notes."""
+            replacements = {
+                "Stage": "단계",
+                "PoC": "MVP",
+                "Demo": "시연",
+                "발표": "시연",
+                "논문": "문서",
+                "캡스톤": "프로젝트",
+                "검증": "확인",
+            }
+            text = str(value or "")
+            for source, target in replacements.items():
+                text = text.replace(source, target)
+            return text
+
         action_labels = {
             "approve": "승인: 작업자가 현장 조치를 진행할 수 있음",
             "reject": "반려: 초안을 실행하지 않음",
@@ -3497,19 +4576,34 @@ def render_work_order_tab(ai_context: dict) -> None:
         }
         decision_rows = [
             {
-                "created_at": decision["created_at"],
-                "decision_id": decision["decision_id"],
-                "draft_id": decision["draft_id"],
-                "event_id": decision["event_id"],
-                "operator_id": decision["operator_id"],
-                "decision": decision["decision"],
-                "action_history": action_labels.get(decision["decision"], "기록됨"),
-                "retraining_candidate": decision["decision"] == "needs_review",
-                "note": decision["note"],
+                "생성 시각": decision["created_at"],
+                "결정": decision["decision_id"][:8],
+                "초안": decision["draft_id"][:8],
+                "센서 이벤트": decision["event_id"][:8],
+                "작업자": decision["operator_id"],
+                "결정값": decision["decision"],
+                "조치 이력": action_labels.get(decision["decision"], "기록됨"),
+                "재학습 후보": decision["decision"] == "needs_review",
+                "메모": safe_operator_note(decision["note"]),
             }
             for decision in decisions
         ]
         st.dataframe(pd.DataFrame(decision_rows), width="stretch", hide_index=True)
+        with st.expander("결정 이력 상세 ID 보기"):
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "decision_id": decision["decision_id"],
+                            "draft_id": decision["draft_id"],
+                            "event_id": decision["event_id"],
+                        }
+                        for decision in decisions
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
         if WORK_ORDER_DECISIONS_PATH.exists():
             st.download_button(
                 "작업지시 결정 이력 CSV 다운로드",
@@ -3621,6 +4715,34 @@ def render_admin_monitoring(ai_context: dict) -> None:
         st.info("아직 감사 로그가 없습니다.")
 
 
+def render_local_notes_tab() -> None:
+    """Render local-only presentation and thesis notes when they exist."""
+    st.subheader("로컬 발표/논문 노트")
+    st.caption(
+        "이 자료는 로컬 폴더에만 보관합니다. local_presentation_notes/는 .gitignore 대상이므로 GitHub에 업로드하지 않습니다."
+    )
+
+    note_rows = []
+    for note_id, path in LOCAL_NOTE_FILES.items():
+        note_rows.append(
+            {
+                "note": note_id,
+                "exists": path.exists(),
+                "path": str(path.relative_to(PROJECT_ROOT)),
+                "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
+                if path.exists()
+                else "",
+            }
+        )
+    st.dataframe(pd.DataFrame(note_rows), width="stretch", hide_index=True)
+
+    for note_id, path in LOCAL_NOTE_FILES.items():
+        if not path.exists():
+            continue
+        with st.expander(note_id.replace("_", " ").title(), expanded=note_id == "industrial_engineering_notes"):
+            st.markdown(path.read_text(encoding="utf-8"))
+
+
 def render_user_app() -> None:
     """Render the product MVP dashboard only."""
     ensure_required_files(USER_REQUIRED_FILE_KEYS)
@@ -3636,24 +4758,20 @@ def render_user_app() -> None:
 
     tabs = st.tabs(
         [
-            "시작하기",
-            "성과 요약",
-            "CSV 예측",
-            "SPC 그래프",
-            "GenAI 리포트",
+            "홈",
+            "데이터 예측",
+            "위험 모니터링",
+            "AI 리포트",
             "작업지시",
-            "적용 범위",
         ]
     )
     with tabs[0]:
         render_start_tab(metrics, threshold_summary, predictions, ai_context)
     with tabs[1]:
-        render_product_summary_tab(metrics, threshold_summary)
-    with tabs[2]:
         render_field_csv_tab(threshold_summary)
-    with tabs[3]:
+    with tabs[2]:
         render_predictive_spc_tab(spc_summary, spc_timeseries)
-    with tabs[4]:
+    with tabs[3]:
         render_ai_report_tab(
             spc_summary,
             spc_timeseries,
@@ -3662,10 +4780,8 @@ def render_user_app() -> None:
             ai_manager_report,
             genai_settings,
         )
-    with tabs[5]:
+    with tabs[4]:
         render_work_order_tab(ai_context)
-    with tabs[6]:
-        render_scope_tab()
 
 
 def render_admin_app() -> None:
@@ -3719,7 +4835,10 @@ def render_admin_app() -> None:
             "Stage 15~20 로컬 통합",
             "Stage 19~20 운영 설계",
             "최종 단계 로드맵",
+            "산업공학 검증 근거",
+            "공개 산업 데이터 검증",
             "논문 검증 근거",
+            "로컬 발표/논문 노트",
         ]
     )
 
@@ -3781,7 +4900,13 @@ def render_admin_app() -> None:
     with tabs[21]:
         render_markdown_tab("최종 단계 로드맵", final_roadmap)
     with tabs[22]:
+        render_industrial_engineering_evidence_tab()
+    with tabs[23]:
+        render_open_industrial_validation_tab()
+    with tabs[24]:
         render_thesis_evidence_tab()
+    with tabs[25]:
+        render_local_notes_tab()
 
 
 def main(app_mode: str = "user") -> None:
@@ -3789,26 +4914,26 @@ def main(app_mode: str = "user") -> None:
     is_admin = app_mode == "admin"
     configure_page(
         page_title=(
-            "AI 예지보전 SPC Admin Console"
+            "연구 검증 Admin Console"
             if is_admin
-            else "AI 예지보전 SPC 대시보드"
+            else "AI 예지보전 운영 대시보드"
         )
     )
     render_header(
-        badge="관리자/검증 콘솔" if is_admin else "제품형 MVP",
+        badge="연구 검증 콘솔" if is_admin else "운영 대시보드",
         title=(
-            "AI 예지보전 SPC Admin Console"
+            "연구 검증 Admin Console"
             if is_admin
-            else "AI 예지보전 SPC 대시보드"
+            else "AI 예지보전 운영 대시보드"
         ),
         subtitle=(
-            "모델 실험, 검증 산출물, 연구 문서, 로컬 운영 PoC 상태를 별도 콘솔에서 확인합니다."
+            "모델 실험, 검증 산출물, 연구 문서, 운영 이력 상태를 별도 콘솔에서 확인합니다."
             if is_admin
-            else "센서 CSV를 업로드하면 고장 확률, High Risk 판정, SPC 그래프, GenAI 관리자 리포트, 승인형 작업지시 흐름을 확인합니다."
+            else "센서 CSV를 기반으로 고장 확률, 위험 우선순위, AI 리포트, 작업지시 이력을 관리합니다."
         ),
     )
     actor = require_login("admin" if is_admin else "operator")
-    st.sidebar.success(f"Signed in: {actor['actor_id']} ({actor['role']})")
+    st.sidebar.success(f"로그인: {actor['actor_id']} ({actor['role']})")
     if st.sidebar.button("로그아웃", key=f"{actor['role']}_logout"):
         record_audit("auth.logout", "success", "session", actor["role"], actor=actor)
         st.session_state.pop(f"{actor['role']}_authenticated", None)

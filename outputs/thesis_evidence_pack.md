@@ -27,6 +27,15 @@ The system implements a reproducible product MVP that connects AI4I failure pred
 | Company CSV preprocessing report | `outputs/company_preprocessing_report.md` | Column mapping, unit conversion, and data-quality diagnosis evidence | True |
 | Probability calibration metrics | `outputs/probability_calibration_metrics.json` | Raw vs calibrated failure-probability reliability evidence | True |
 | Risk priority queue | `outputs/company_risk_priority_queue.csv` | Risk-prioritized operator workflow evidence | True |
+| Industrial engineering evidence | `outputs/industrial_engineering_evidence.md` | OEE/MTBF/MTTR, FMEA/RPN, SPC, cost simulation, and risk-priority formula | True |
+| Open industrial validation metrics | `outputs/open_industrial_validation_metrics.csv` | Public industrial dataset adapter, alert strategy comparison, and lead-time/cost simulation | True |
+| Open industrial lead-time report | `outputs/open_industrial_lead_time_report.md` | Early-warning lead-time definition and strategy comparison | True |
+| Public industrial benchmark metrics | `outputs/public_industrial_validation_metrics.csv` | MetroPT-3, C-MAPSS, IMS, and FEMTO-style alert strategy comparison | True |
+| Public industrial RUL metrics | `outputs/public_industrial_rul_metrics.csv` | RUL RMSE/MAE and NASA-style score comparison on public benchmark adapters | True |
+| Public benchmark claims | `outputs/public_benchmark_claims.md` | Claim guardrails for public benchmark versus field proof | True |
+| SCANIA official cost metrics | `outputs/scania_official_cost_metrics.csv` | Public benchmark class 0~4 official cost metric and rule-baseline improvement | True |
+| SCANIA official cost report | `outputs/scania_official_cost_report.md` | Thesis-safe official cost metric claim and alert-burden guardrail | True |
+| Field validation protocol | `outputs/field_validation_protocol.md` | Required field-data protocol for future real cost and lead-time proof | True |
 
 ## Commercial Reference Systems
 
@@ -39,4 +48,4 @@ The system implements a reproducible product MVP that connects AI4I failure pred
 
 ## Recommended Comparison Sentence
 
-Rather than claiming superiority over commercial platforms, the thesis compares transparent model strategies and alert policies on the same AI4I test split, then shows how the selected risk signal is connected to explanation and human-approved work-order decisions.
+Rather than claiming superiority over commercial platforms, the thesis compares transparent model strategies and alert policies on the same AI4I test split, adds SCANIA official-cost evidence and public benchmark adapters for MetroPT-3, C-MAPSS, IMS, and FEMTO-style data, then shows how the selected risk signal is connected to explanation and human-approved work-order decisions.

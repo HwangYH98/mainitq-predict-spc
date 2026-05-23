@@ -26,7 +26,24 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Starting Streamlit admin dashboard on http://127.0.0.1:8502 ...
+if not defined APP_ADMIN_PASSWORD (
+    echo.
+    echo Admin console password is not set for this window.
+    echo The password you type here is used only for this app session.
+    echo It is not written to any file, .env, Git, or README.
+    echo.
+    set /p "APP_ADMIN_PASSWORD=Enter admin console password: "
+    powershell -NoProfile -Command "if ([string]::IsNullOrWhiteSpace($env:APP_ADMIN_PASSWORD)) { exit 1 } else { exit 0 }" >nul 2>nul
+    if errorlevel 1 (
+        echo.
+        echo APP_ADMIN_PASSWORD was empty. Admin console was not started.
+        exit /b 1
+    )
+    cls
+    echo Admin console password was received for this session only.
+)
+
+echo Starting research validation Admin Console on http://127.0.0.1:8502 ...
 "%PYTHON%" -m streamlit run app\admin_dashboard.py --server.port 8502 --server.headless true --browser.gatherUsageStats false
 if errorlevel 1 goto error
 

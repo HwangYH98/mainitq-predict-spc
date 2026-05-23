@@ -11,6 +11,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 APP_DIR = PROJECT_ROOT / "app"
+DESKTOP_APP_DIR = PROJECT_ROOT / "desktop_app"
 DATA_PATH = PROJECT_ROOT / "data" / "ai4i2020.csv"
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
@@ -108,6 +109,7 @@ REQUIRED_COMPARISON_OUTPUTS = [
     "workflow_traceability_summary.csv",
     "workflow_traceability_summary.json",
     "workflow_traceability_summary.md",
+    "industrial_engineering_evidence.md",
     "thesis_evidence_pack.md",
     "company_input_quality_report.csv",
     "company_input_quality_report.json",
@@ -119,6 +121,36 @@ REQUIRED_COMPARISON_OUTPUTS = [
     "company_prediction_results.csv",
     "company_risk_priority_queue.csv",
     "operating_policy_simulation.md",
+    "open_industrial_validation_metrics.csv",
+    "open_industrial_validation_metrics.json",
+    "open_industrial_validation_report.md",
+    "open_industrial_cost_simulation.csv",
+    "open_industrial_lead_time_report.md",
+    "open_industrial_lead_time_chart.png",
+    "public_industrial_validation_metrics.csv",
+    "public_industrial_lead_time_metrics.csv",
+    "public_industrial_cost_simulation.csv",
+    "public_industrial_rul_metrics.csv",
+    "public_industrial_validation_report.md",
+    "public_benchmark_claims.md",
+    "public_industrial_lead_time_chart.png",
+    "public_industrial_cost_chart.png",
+    "public_industrial_rul_chart.png",
+    "public_industrial_confusion_matrix.png",
+    "public_industrial_validation_metadata.json",
+    "scania_official_cost_metrics.csv",
+    "scania_official_cost_metrics.json",
+    "scania_official_predictions.csv",
+    "scania_official_cost_report.md",
+    "scania_official_cost_comparison.png",
+    "scania_official_confusion_matrix.png",
+    "field_validation_protocol.md",
+    "field_data_template.csv",
+    "field_cost_template.csv",
+    "field_validation_report.csv",
+    "field_validation_report.json",
+    "field_validation_report.md",
+    "run_to_failure_evidence_summary.md",
 ]
 
 EXPECTED_MODEL_STRATEGIES = {
@@ -168,6 +200,27 @@ EXPECTED_WORKFLOW_METRICS = {
 }
 
 EXPECTED_OPERATING_POLICIES_FOR_ENGINE = {"precision_first", "balanced", "recall_first"}
+EXPECTED_OPEN_INDUSTRIAL_STRATEGIES = {
+    "rule_based_threshold",
+    "spc_style_baseline",
+    "logistic_regression",
+    "xgboost_default",
+    "xgboost_tuned_threshold",
+    "ml_spc_combined",
+}
+
+EXPECTED_PUBLIC_INDUSTRIAL_DATASETS = {"metropt3", "cmapss", "ims", "femto"}
+
+EXPECTED_SCANIA_OFFICIAL_STRATEGIES = {
+    "no_alert_all_0",
+    "rule_based_threshold",
+    "spc_style_baseline",
+    "logistic_multiclass",
+    "xgboost_multiclass_argmax",
+    "xgboost_cost_optimized",
+}
+
+EXPECTED_SCANIA_CLASSES = {0, 1, 2, 3, 4}
 
 REQUIRED_PREDICTION_COLUMNS = [
     "UDI",
@@ -196,7 +249,11 @@ def require_file(path: Path) -> None:
 
 
 def verify_python_files_compile() -> None:
-    python_files = sorted(SRC_DIR.glob("*.py")) + sorted(APP_DIR.glob("*.py"))
+    python_files = (
+        sorted(SRC_DIR.glob("*.py"))
+        + sorted(APP_DIR.glob("*.py"))
+        + sorted(DESKTOP_APP_DIR.glob("*.py"))
+    )
     if not python_files:
         fail("No Python files found in src/ or app/.")
 
@@ -719,6 +776,27 @@ def verify_comparison_outputs() -> None:
     if "not automatic maintenance-command execution" not in workflow_markdown:
         fail("workflow_traceability_summary.md is missing the automatic-maintenance guardrail.")
 
+    industrial_evidence = (OUTPUT_DIR / "industrial_engineering_evidence.md").read_text(encoding="utf-8")
+    required_industrial_phrases = [
+        "OEE = Availability x Performance x Quality",
+        "MTBF = total operating time / number of failures",
+        "RPN = Severity x Occurrence x Detection",
+        "risk_priority_score = clip",
+        "UCL = mean + 3 x sigma",
+        "normalized_operating_cost",
+        "30% cost reduction",
+        "85% detection-time reduction",
+        "commercial SaaS",
+    ]
+    missing_industrial_phrases = [
+        phrase for phrase in required_industrial_phrases if phrase not in industrial_evidence
+    ]
+    if missing_industrial_phrases:
+        fail(
+            "industrial_engineering_evidence.md is missing required thesis phrases: "
+            f"{missing_industrial_phrases}"
+        )
+
     evidence_pack = (OUTPUT_DIR / "thesis_evidence_pack.md").read_text(encoding="utf-8")
     required_evidence_phrases = [
         "Do Not Claim",
@@ -733,10 +811,326 @@ def verify_comparison_outputs() -> None:
     if missing_evidence_phrases:
         fail(f"thesis_evidence_pack.md is missing guardrail phrases: {missing_evidence_phrases}")
 
+    open_metrics = pd.read_csv(OUTPUT_DIR / "open_industrial_validation_metrics.csv")
+    required_open_columns = [
+        "dataset_id",
+        "source_mode",
+        "strategy_id",
+        "precision",
+        "recall",
+        "f1_score",
+        "pr_auc",
+        "alert_count",
+        "false_alarm_count",
+        "missed_failure_count",
+        "early_warning_rate",
+        "mean_lead_time_steps",
+    ]
+    missing_open_columns = [
+        column for column in required_open_columns if column not in open_metrics.columns
+    ]
+    if missing_open_columns:
+        fail(f"open_industrial_validation_metrics.csv is missing columns: {missing_open_columns}")
+    if EXPECTED_OPEN_INDUSTRIAL_STRATEGIES - set(open_metrics["strategy_id"].astype(str)):
+        fail("open_industrial_validation_metrics.csv is missing one or more required strategies.")
+    if open_metrics[["precision", "recall", "f1_score", "pr_auc"]].isna().any().any():
+        fail("open_industrial_validation_metrics.csv contains missing model metrics.")
+
+    open_cost = pd.read_csv(OUTPUT_DIR / "open_industrial_cost_simulation.csv")
+    if "normalized_operating_cost" not in open_cost.columns or "cost_scope" not in open_cost.columns:
+        fail("open_industrial_cost_simulation.csv is missing cost columns.")
+    if set(open_cost["cost_scope"].astype(str)) != {"simulation_only"}:
+        fail("open_industrial_cost_simulation.csv must mark costs as simulation_only.")
+
+    open_report_text = (
+        (OUTPUT_DIR / "open_industrial_validation_report.md").read_text(encoding="utf-8")
+        + (OUTPUT_DIR / "open_industrial_lead_time_report.md").read_text(encoding="utf-8")
+    )
+    required_open_phrases = [
+        "not a field deployment",
+        "not a real factory cost-reduction proof",
+        "cost simulation",
+        "lead_time_steps",
+    ]
+    missing_open_phrases = [
+        phrase for phrase in required_open_phrases if phrase not in open_report_text
+    ]
+    if missing_open_phrases:
+        fail(f"Open industrial validation reports are missing guardrail phrases: {missing_open_phrases}")
+
+    public_metrics = pd.read_csv(OUTPUT_DIR / "public_industrial_validation_metrics.csv")
+    required_public_columns = [
+        "dataset_id",
+        "source_mode",
+        "label_scope",
+        "strategy_id",
+        "precision",
+        "recall",
+        "f1_score",
+        "pr_auc",
+        "alert_count",
+        "false_alarm_count",
+        "missed_failure_count",
+        "early_warning_rate",
+        "mean_lead_time_steps",
+    ]
+    missing_public_columns = [
+        column for column in required_public_columns if column not in public_metrics.columns
+    ]
+    if missing_public_columns:
+        fail(f"public_industrial_validation_metrics.csv is missing columns: {missing_public_columns}")
+    if EXPECTED_PUBLIC_INDUSTRIAL_DATASETS - set(public_metrics["dataset_id"].astype(str)):
+        fail("public_industrial_validation_metrics.csv is missing one or more required datasets.")
+    for dataset_id, group in public_metrics.groupby("dataset_id"):
+        if EXPECTED_OPEN_INDUSTRIAL_STRATEGIES - set(group["strategy_id"].astype(str)):
+            fail(f"public_industrial_validation_metrics.csv is missing strategies for {dataset_id}.")
+    if public_metrics[["precision", "recall", "f1_score", "pr_auc"]].isna().any().any():
+        fail("public_industrial_validation_metrics.csv contains missing model metrics.")
+
+    public_lead = pd.read_csv(OUTPUT_DIR / "public_industrial_lead_time_metrics.csv")
+    if EXPECTED_PUBLIC_INDUSTRIAL_DATASETS - set(public_lead["dataset_id"].astype(str)):
+        fail("public_industrial_lead_time_metrics.csv is missing one or more required datasets.")
+    if "mean_lead_time_steps" not in public_lead.columns or "early_warning_rate" not in public_lead.columns:
+        fail("public_industrial_lead_time_metrics.csv is missing lead-time columns.")
+
+    public_cost = pd.read_csv(OUTPUT_DIR / "public_industrial_cost_simulation.csv")
+    if EXPECTED_PUBLIC_INDUSTRIAL_DATASETS - set(public_cost["dataset_id"].astype(str)):
+        fail("public_industrial_cost_simulation.csv is missing one or more required datasets.")
+    if set(public_cost["cost_scope"].astype(str)) != {"simulation_only"}:
+        fail("public_industrial_cost_simulation.csv must mark costs as simulation_only.")
+
+    public_rul = pd.read_csv(OUTPUT_DIR / "public_industrial_rul_metrics.csv")
+    required_rul_columns = [
+        "dataset_id",
+        "source_mode",
+        "model_id",
+        "rmse",
+        "mae",
+        "nasa_style_rul_score",
+        "rul_scope",
+    ]
+    missing_rul_columns = [
+        column for column in required_rul_columns if column not in public_rul.columns
+    ]
+    if missing_rul_columns:
+        fail(f"public_industrial_rul_metrics.csv is missing columns: {missing_rul_columns}")
+    if EXPECTED_PUBLIC_INDUSTRIAL_DATASETS - set(public_rul["dataset_id"].astype(str)):
+        fail("public_industrial_rul_metrics.csv is missing one or more required datasets.")
+
+    public_metadata = json.loads(
+        (OUTPUT_DIR / "public_industrial_validation_metadata.json").read_text(encoding="utf-8")
+    )
+    if EXPECTED_PUBLIC_INDUSTRIAL_DATASETS - {str(item.get("dataset_id")) for item in public_metadata}:
+        fail("public_industrial_validation_metadata.json is missing one or more required datasets.")
+
+    public_report_text = (
+        (OUTPUT_DIR / "public_industrial_validation_report.md").read_text(encoding="utf-8")
+        + (OUTPUT_DIR / "public_benchmark_claims.md").read_text(encoding="utf-8")
+    )
+    required_public_phrases = [
+        "not a field deployment",
+        "not a real factory cost-reduction proof",
+        "MetroPT-3",
+        "NASA C-MAPSS",
+        "IMS Bearing",
+        "FEMTO/PRONOSTIA",
+        "Do not claim actual factory cost reduction",
+    ]
+    missing_public_phrases = [
+        phrase for phrase in required_public_phrases if phrase not in public_report_text
+    ]
+    if missing_public_phrases:
+        fail(f"Public industrial benchmark reports are missing guardrail phrases: {missing_public_phrases}")
+
+    scania_metrics = pd.read_csv(OUTPUT_DIR / "scania_official_cost_metrics.csv")
+    required_scania_columns = [
+        "strategy_id",
+        "display_name",
+        "official_cost",
+        "normalized_cost",
+        "cost_improvement_vs_no_alert",
+        "cost_improvement_vs_rule",
+        "macro_f1",
+        "balanced_accuracy",
+        "alert_like_rate",
+        "recall_class_0",
+        "recall_class_1",
+        "recall_class_2",
+        "recall_class_3",
+        "recall_class_4",
+    ]
+    missing_scania_columns = [
+        column for column in required_scania_columns if column not in scania_metrics.columns
+    ]
+    if missing_scania_columns:
+        fail(f"scania_official_cost_metrics.csv is missing columns: {missing_scania_columns}")
+    if EXPECTED_SCANIA_OFFICIAL_STRATEGIES - set(scania_metrics["strategy_id"].astype(str)):
+        fail("scania_official_cost_metrics.csv is missing one or more official-cost strategies.")
+    cost_optimized = scania_metrics[
+        scania_metrics["strategy_id"].astype(str) == "xgboost_cost_optimized"
+    ]
+    if cost_optimized.empty:
+        fail("scania_official_cost_metrics.csv is missing xgboost_cost_optimized.")
+    if cost_optimized["official_cost"].isna().any():
+        fail("xgboost_cost_optimized official cost is missing.")
+    if cost_optimized["cost_improvement_vs_rule"].isna().any():
+        fail("xgboost_cost_optimized cost improvement vs rule is missing.")
+    if (scania_metrics["alert_like_rate"] < 0).any() or (scania_metrics["alert_like_rate"] > 1).any():
+        fail("scania_official_cost_metrics.csv has invalid alert_like_rate values.")
+
+    scania_metadata = json.loads(
+        (OUTPUT_DIR / "scania_official_cost_metrics.json").read_text(encoding="utf-8")
+    )
+    if "metadata" in scania_metadata:
+        scania_metadata = scania_metadata["metadata"]
+    official_matrix = scania_metadata.get("official_cost_matrix")
+    expected_matrix = [
+        [0, 7, 8, 9, 10],
+        [200, 0, 7, 8, 9],
+        [300, 200, 0, 7, 8],
+        [400, 300, 200, 0, 7],
+        [500, 400, 300, 200, 0],
+    ]
+    if official_matrix != expected_matrix:
+        fail("scania_official_cost_metrics.json official_cost_matrix does not match the expected matrix.")
+    validation_distribution = scania_metadata.get("validation_class_distribution", {})
+    if {int(key) for key in validation_distribution.keys()} != EXPECTED_SCANIA_CLASSES:
+        fail("scania_official_cost_metrics.json is missing one or more validation classes 0~4.")
+
+    scania_predictions = pd.read_csv(OUTPUT_DIR / "scania_official_predictions.csv")
+    required_prediction_columns = [
+        "vehicle_id",
+        "actual_class",
+        "rule_based_threshold_predicted_class",
+        "xgboost_cost_optimized_predicted_class",
+        "xgboost_probability_class_0",
+        "xgboost_probability_class_4",
+        "xgboost_expected_cost_min",
+    ]
+    missing_prediction_columns = [
+        column for column in required_prediction_columns if column not in scania_predictions.columns
+    ]
+    if missing_prediction_columns:
+        fail(f"scania_official_predictions.csv is missing columns: {missing_prediction_columns}")
+    if set(pd.to_numeric(scania_predictions["actual_class"]).astype(int).unique()) - EXPECTED_SCANIA_CLASSES:
+        fail("scania_official_predictions.csv contains invalid official class labels.")
+
+    scania_report = (OUTPUT_DIR / "scania_official_cost_report.md").read_text(encoding="utf-8")
+    required_scania_report_phrases = [
+        "SCANIA official cost metric improvement",
+        "not real KRW maintenance-cost reduction proof",
+        "not site-specific factory deployment proof",
+        "alert-like prediction rate",
+    ]
+    missing_scania_report_phrases = [
+        phrase for phrase in required_scania_report_phrases if phrase not in scania_report
+    ]
+    if missing_scania_report_phrases:
+        fail(f"scania_official_cost_report.md is missing guardrail phrases: {missing_scania_report_phrases}")
+
+    field_protocol = (OUTPUT_DIR / "field_validation_protocol.md").read_text(encoding="utf-8")
+    required_field_phrases = [
+        "lead_time_minutes",
+        "cost_delta_rate",
+        "company-specific before/after data",
+        "Do not claim actual 30% cost reduction or 85% detection-time reduction",
+    ]
+    missing_field_phrases = [
+        phrase for phrase in required_field_phrases if phrase not in field_protocol
+    ]
+    if missing_field_phrases:
+        fail(f"field_validation_protocol.md is missing required field-proof phrases: {missing_field_phrases}")
+
+    field_data = pd.read_csv(OUTPUT_DIR / "field_data_template.csv")
+    required_field_data_columns = [
+        "equipment_id",
+        "timestamp",
+        "source_system",
+        "sensor_schema_version",
+        "actual_failure",
+        "failure_timestamp",
+        "work_order_id",
+        "operator_decision",
+    ]
+    missing_field_data_columns = [
+        column for column in required_field_data_columns if column not in field_data.columns
+    ]
+    if missing_field_data_columns:
+        fail(f"field_data_template.csv is missing columns: {missing_field_data_columns}")
+
+    field_cost = pd.read_csv(OUTPUT_DIR / "field_cost_template.csv")
+    required_field_cost_columns = [
+        "work_order_id",
+        "maintenance_start",
+        "maintenance_end",
+        "downtime_minutes",
+        "parts_cost",
+        "labor_cost",
+        "lost_production_cost",
+        "baseline_total_cost",
+        "new_policy_total_cost",
+        "baseline_policy",
+        "new_policy",
+    ]
+    missing_field_cost_columns = [
+        column for column in required_field_cost_columns if column not in field_cost.columns
+    ]
+    if missing_field_cost_columns:
+        fail(f"field_cost_template.csv is missing columns: {missing_field_cost_columns}")
+
+    field_report = pd.read_csv(OUTPUT_DIR / "field_validation_report.csv")
+    required_field_report_columns = [
+        "precision",
+        "recall",
+        "false_alarm_count",
+        "missed_failure_count",
+        "lead_time_minutes_mean",
+        "downtime_minutes_total",
+        "maintenance_cost_delta_rate",
+        "source_mode",
+        "claim_status",
+    ]
+    missing_field_report_columns = [
+        column for column in required_field_report_columns if column not in field_report.columns
+    ]
+    if missing_field_report_columns:
+        fail(f"field_validation_report.csv is missing columns: {missing_field_report_columns}")
+    field_report_json = json.loads((OUTPUT_DIR / "field_validation_report.json").read_text(encoding="utf-8"))
+    if field_report_json.get("claim_status") not in {
+        "template_demo_not_field_proof",
+        "field_validation_ready",
+        "prediction_quality_only_cost_claim_not_supported",
+    }:
+        fail("field_validation_report.json has an invalid claim_status.")
+    if field_report_json.get("source_mode") not in {"template_demo", "company_field_logs"}:
+        fail("field_validation_report.json has an invalid source_mode.")
+    field_report_md = (OUTPUT_DIR / "field_validation_report.md").read_text(encoding="utf-8")
+    required_field_report_phrases = [
+        "Actual field cost reduction can be claimed only",
+        "Actual lead-time improvement can be claimed only",
+    ]
+    missing_field_report_phrases = [
+        phrase for phrase in required_field_report_phrases if phrase not in field_report_md
+    ]
+    if missing_field_report_phrases:
+        fail(f"field_validation_report.md is missing guardrail phrases: {missing_field_report_phrases}")
+    run_to_failure = (OUTPUT_DIR / "run_to_failure_evidence_summary.md").read_text(encoding="utf-8")
+    required_run_to_failure_phrases = [
+        "Run-to-Failure Benchmark Evidence Summary",
+        "actual company cost reduction",
+        "Lite runtime results are not a replacement",
+    ]
+    missing_run_to_failure_phrases = [
+        phrase for phrase in required_run_to_failure_phrases if phrase not in run_to_failure
+    ]
+    if missing_run_to_failure_phrases:
+        fail(f"run_to_failure_evidence_summary.md is missing guardrail phrases: {missing_run_to_failure_phrases}")
+
     pass_step(
         "Comparison and mock-bridge outputs passed "
         f"({len(model_comparison)} model rows, {len(spc_comparison)} alert rows, "
-        f"{len(operational)} operating-value rows)."
+        f"{len(operational)} operating-value rows, {len(scania_metrics)} SCANIA official rows, "
+        f"{public_metrics['dataset_id'].nunique()} public benchmark datasets)."
     )
 
 
@@ -834,10 +1228,17 @@ def verify_utf8_documents() -> None:
         OUTPUT_DIR / "operational_value_simulation.md",
         OUTPUT_DIR / "product_capability_comparison.md",
         OUTPUT_DIR / "workflow_traceability_summary.md",
+        OUTPUT_DIR / "industrial_engineering_evidence.md",
         OUTPUT_DIR / "thesis_evidence_pack.md",
         OUTPUT_DIR / "company_preprocessing_report.md",
         OUTPUT_DIR / "prediction_confidence_report.md",
         OUTPUT_DIR / "operating_policy_simulation.md",
+        OUTPUT_DIR / "open_industrial_validation_report.md",
+        OUTPUT_DIR / "open_industrial_lead_time_report.md",
+        OUTPUT_DIR / "public_industrial_validation_report.md",
+        OUTPUT_DIR / "public_benchmark_claims.md",
+        OUTPUT_DIR / "scania_official_cost_report.md",
+        OUTPUT_DIR / "field_validation_protocol.md",
     ]
 
     for path in documents:

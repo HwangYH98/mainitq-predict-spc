@@ -624,12 +624,12 @@ def calculate_priority_scores(
 def recommendation_for_row(probability: float, threshold: float, priority_score: float, quality_status: str) -> str:
     """Return a concise operator-facing recommendation."""
     if probability >= threshold and priority_score >= 80:
-        return "High priority: inspect torque/load, temperature, and tool-wear conditions before operation continues."
+        return "최우선 점검: 운전 지속 전 토크/부하, 온도, 공구 마모 상태를 확인하세요."
     if probability >= threshold:
-        return "Alert: review sensor context and create a human-approved work-order draft."
+        return "주의 경보: 센서 맥락을 검토하고 작업자 승인용 작업지시 초안을 생성하세요."
     if quality_status == "Low":
-        return "Data quality is low: fix source data before relying on this probability."
-    return "Monitor: below the selected threshold, but keep trend history for review."
+        return "데이터 품질 낮음: 이 확률을 사용하기 전 원본 데이터 형식과 결측값을 먼저 보정하세요."
+    return "모니터링 유지: 현재 기준 미만이지만 추세 이력은 계속 확인하세요."
 
 
 def write_preprocessing_report(quality_df: pd.DataFrame, report: dict) -> None:
@@ -767,6 +767,11 @@ def predict_company_sensor_csv(
     )
     result_df = canonical_df.copy()
     result_df.insert(0, "input_row", range(len(result_df)))
+    result_df["engine_profile"] = "full"
+    result_df["score_method"] = "정밀 예측 엔진"
+    result_df["interpretation_note"] = (
+        "정밀 분석 모드 결과입니다. XGBoost 기반 예측 확률, calibration, 운영 정책 threshold를 적용했습니다."
+    )
     result_df["raw_probability"] = np.round(raw_probability, 6)
     result_df["calibrated_probability"] = np.round(calibrated_probability, 6)
     result_df["operating_policy"] = policy_id
@@ -805,6 +810,9 @@ def predict_company_sensor_csv(
         "policy": selected_policy,
         "policies": bundle["policies"],
         "calibration_metrics": bundle["calibration_metrics"],
+        "engine_profile": "full",
+        "score_method": "정밀 예측 엔진",
+        "interpretation_note": "정밀 분석 모드의 XGBoost 기반 분석 결과입니다.",
         "calibration_curve_path": str(CALIBRATION_PNG),
         "output_paths": {
             "quality_csv": str(QUALITY_CSV),

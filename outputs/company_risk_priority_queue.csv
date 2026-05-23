@@ -1,4 +1,0 @@
-﻿priority_rank,input_row,Type,Air temperature [K],Process temperature [K],Rotational speed [rpm],Torque [Nm],Tool wear [min],raw_probability,calibrated_probability,operating_policy,selected_threshold,risk_status,risk_priority_score,data_quality_status,recommendation
-1,2,H,303.34999999999997,312.95,1320,58.2,120,0.260517,0.0875,balanced,0.51,Normal,11.3,High,"Monitor: below the selected threshold, but keep trend history for review."
-2,0,L,298.15,308.54999999999995,1551,42.8,0,0.00339,0.0,balanced,0.51,Normal,5.0,High,"Monitor: below the selected threshold, but keep trend history for review."
-3,1,M,299.25,309.75,1408,46.3,3,0.014575,0.0,balanced,0.51,Normal,5.0,High,"Monitor: below the selected threshold, but keep trend history for review."

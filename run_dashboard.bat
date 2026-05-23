@@ -26,7 +26,24 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Starting AI Predictive SPC user dashboard on http://127.0.0.1:8501 ...
+if not defined APP_OPERATOR_PASSWORD (
+    echo.
+    echo Operator dashboard password is not set for this window.
+    echo The password you type here is used only for this app session.
+    echo It is not written to any file, .env, Git, or README.
+    echo.
+    set /p "APP_OPERATOR_PASSWORD=Enter operator dashboard password: "
+    powershell -NoProfile -Command "if ([string]::IsNullOrWhiteSpace($env:APP_OPERATOR_PASSWORD)) { exit 1 } else { exit 0 }" >nul 2>nul
+    if errorlevel 1 (
+        echo.
+        echo APP_OPERATOR_PASSWORD was empty. Dashboard was not started.
+        exit /b 1
+    )
+    cls
+    echo Operator dashboard password was received for this session only.
+)
+
+echo Starting AI predictive maintenance operations dashboard on http://127.0.0.1:8501 ...
 "%PYTHON%" -m streamlit run app\dashboard.py --server.headless true --browser.gatherUsageStats false
 if errorlevel 1 goto error
 

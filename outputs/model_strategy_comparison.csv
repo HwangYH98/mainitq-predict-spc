@@ -1,7 +1,0 @@
-﻿strategy_id,display_name,model_family,uses_smote,threshold_strategy,threshold,precision,recall,f1_score,roc_auc,pr_auc,alert_count,false_positive,false_negative,true_positive,true_negative
-xgboost_default_tuned_threshold,XGBoost + tuned threshold,xgboost,False,f1_tuned,0.87,0.8197,0.7353,0.7752,0.9736,0.8014,61,11,18,50,1921
-xgboost_smote_tuned_threshold,XGBoost + SMOTE + tuned threshold,xgboost,True,f1_tuned,0.8,0.6216,0.6765,0.6479,0.9632,0.7163,74,28,22,46,1904
-xgboost_default,XGBoost,xgboost,False,default_0_50,0.5,0.4444,0.8824,0.5911,0.9736,0.8014,135,75,8,60,1857
-xgboost_smote,XGBoost + SMOTE,xgboost,True,default_0_50,0.5,0.4231,0.8088,0.5556,0.9632,0.7163,130,75,13,55,1857
-logistic_regression_smote,Logistic Regression + SMOTE,logistic_regression,True,default_0_50,0.5,0.1484,0.8382,0.2522,0.9074,0.3878,384,327,11,57,1605
-logistic_regression_default,Logistic Regression,logistic_regression,False,default_0_50,0.5,0.1418,0.8235,0.2419,0.9069,0.3817,395,339,12,56,1593

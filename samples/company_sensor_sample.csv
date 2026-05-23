@@ -1,0 +1,4 @@
+product_grade,air_temp_c,process_temp_c,rpm,motor_torque_nm,wear_minutes
+L,25.0,35.4,1551,42.8,0
+M,26.1,36.6,1408,46.3,3
+H,30.2,39.8,1320,58.2,120

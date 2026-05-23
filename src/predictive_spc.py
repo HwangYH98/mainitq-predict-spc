@@ -56,7 +56,7 @@ def require_file(path: Path) -> None:
     if not path.exists():
         raise FileNotFoundError(
             f"Missing required file: {path}\n"
-            "Run train_baseline.py and stage4_explain.py before creating SPC outputs."
+            "Run the baseline training and explanation scripts before creating SPC outputs."
         )
 
 
@@ -81,10 +81,10 @@ def build_spc_timeseries(
     rolling_window: int = ROLLING_WINDOW,
 ) -> pd.DataFrame:
     """
-    Convert saved test predictions into a presentation-safe time-series simulation.
+    Convert saved test predictions into an offline time-series simulation.
 
     AI4I is not a live sensor stream in this project, so UDI order is used as a
-    transparent simulated time axis for final presentation and paper discussion.
+    transparent simulated time axis for monitoring and report review.
     """
     sensor_columns = [
         "UDI",
@@ -159,7 +159,7 @@ def summarize_spc(spc_df: pd.DataFrame, selected_threshold: float) -> dict:
     return {
         "source": "AI4I 2020 test predictions with UDI-order simulated time axis",
         "note": (
-            "This is a presentation-safe time-series simulation, not a live "
+            "This is an offline time-series simulation, not a live "
             "factory sensor stream."
         ),
         "selected_threshold": float(selected_threshold),
@@ -394,7 +394,7 @@ def build_ai_report_context(spc_df: pd.DataFrame, spc_summary: dict, local_case:
     candidate = spc_df.sort_values("xgboost_probability", ascending=False).iloc[0]
     time_step = int(candidate["time_step"])
     return {
-        "report_scope": "manager reference report for final capstone presentation",
+        "report_scope": "operations manager reference report",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "simulation_note": (
             "AI4I rows are ordered by UDI to simulate a time-series stream. "
@@ -426,7 +426,7 @@ def build_ai_report_context(spc_df: pd.DataFrame, spc_summary: dict, local_case:
         "guardrail": (
             "Use current risk, future 10-step deviation prediction, and SHAP evidence "
             "only as a manager reference. Do not write an automatic maintenance order. "
-            "Say final action must be confirmed by field staff."
+            "Say the confirmed action must be approved by field staff."
         ),
     }
 
@@ -487,7 +487,7 @@ def fallback_ai_report(context: dict, reason: str) -> str:
             "",
             "## 5. 한계",
             "",
-            "이 리포트는 자동 정비 명령이 아니라 발표용 PoC의 관리자 참고 초안입니다.",
+            "이 리포트는 자동 정비 명령이 아니라 운영 관리자 참고 초안입니다.",
             "",
         ]
     )
@@ -607,7 +607,7 @@ def build_gemini_headers(api_key: str) -> dict:
     }
 
 
-def build_openai_payload(input_text: str, max_output_tokens: int = 900) -> dict:
+def build_openai_payload(input_text: str, max_output_tokens: int = 4096) -> dict:
     """Create the official Responses API payload used by reports and preflight."""
     return {
         "model": openai_model_name(),
@@ -622,7 +622,7 @@ def build_openai_payload(input_text: str, max_output_tokens: int = 900) -> dict:
     }
 
 
-def build_gemini_payload(input_text: str, max_output_tokens: int = 900) -> dict:
+def build_gemini_payload(input_text: str, max_output_tokens: int = 4096) -> dict:
     """Create the Gemini generateContent payload used by reports and preflight."""
     return {
         "system_instruction": {
@@ -743,7 +743,7 @@ def create_gemini_request(api_key: str, model: str, input_text: str, max_output_
 def call_gemini_generate_content(
     api_key: str,
     input_text: str,
-    max_output_tokens: int = 900,
+    max_output_tokens: int = 4096,
     timeout: int = 45,
 ) -> tuple[str, str]:
     """Call Gemini, retrying transient overloads with fallback model candidates."""
@@ -779,19 +779,19 @@ def openai_ai_report(context: dict, require_openai: bool = False) -> tuple[str, 
     Call the OpenAI Responses API when OPENAI_API_KEY is available.
 
     When require_openai is True, fallback is not accepted and API/key problems
-    raise a clear error for the Stage 1~20 full verification run.
+    raise a clear error for the required full GenAI verification run.
     """
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         if require_openai:
             raise RuntimeError(
                 "OPENAI_API_KEY is required because REQUIRE_OPENAI_REPORT=1. "
-                "Run run_stage1_20_openai.ps1 and enter a valid key."
+                "Set a valid OpenAI API key in the current session."
             )
         return fallback_ai_report(context, "OPENAI_API_KEY not set"), "fallback_no_api_key"
 
     model = openai_model_name()
-    payload = build_openai_payload(build_llm_prompt(context), max_output_tokens=900)
+    payload = build_openai_payload(build_llm_prompt(context), max_output_tokens=4096)
     request = urllib.request.Request(
         OPENAI_RESPONSES_URL,
         data=json.dumps(payload).encode("utf-8"),
@@ -826,16 +826,16 @@ def gemini_ai_report(context: dict, require_gemini: bool = False) -> tuple[str, 
     """
     Call the Gemini generateContent API when GEMINI_API_KEY is available.
 
-    When require_gemini is True, fallback is not accepted for the Stage 1~20
-    full verification run.
+    When require_gemini is True, fallback is not accepted for the required
+    full GenAI verification run.
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         if require_gemini:
             raise RuntimeError(
                 "GEMINI_API_KEY is required because REQUIRE_GENAI_REPORT=1 "
-                "and AI_REPORT_PROVIDER=gemini. Run run_stage1_20_gemini.ps1 "
-                "and enter a valid key."
+                "and AI_REPORT_PROVIDER=gemini. Set a valid Gemini API key "
+                "in the current session."
             )
         return fallback_ai_report(context, "GEMINI_API_KEY not set"), "fallback_no_api_key"
 
@@ -843,7 +843,7 @@ def gemini_ai_report(context: dict, require_gemini: bool = False) -> tuple[str, 
         report, model = call_gemini_generate_content(
             api_key,
             build_llm_prompt(context),
-            max_output_tokens=900,
+            max_output_tokens=4096,
             timeout=45,
         )
         if not report:

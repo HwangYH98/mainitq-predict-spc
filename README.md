@@ -1,59 +1,65 @@
-# AI Predictive SPC Dashboard
+# MaintiQ Predict
 
-AI4I 2020 공개 데이터를 기반으로 제조 설비 고장 가능성을 예측하고, Predictive SPC 그래프, SHAP 위험요인, GenAI 관리자 리포트, 승인형 작업지시 이력을 연결한 제품형 MVP입니다.
+MaintiQ Predict는 제조 설비 센서 CSV를 입력받아 고장 위험도, 위험 우선순위, AI 관리자 리포트, 승인형 작업지시 이력을 관리하는 Windows 데스크톱 예지보전 MVP입니다.
 
-이 저장소는 실제 PLC/SCADA 운영 제품이 아닙니다. 센서 CSV, 로컬 FastAPI, SQLite, Streamlit을 이용해 현장 시스템으로 확장 가능한 데이터 흐름을 검증합니다.
+이 저장소는 코드, 샘플 데이터, 검증 스크립트, 설치파일 빌드 스크립트를 포함합니다. 설치파일 자체는 Git에 커밋하지 않고 GitHub Release 첨부 파일로 관리합니다.
 
-## 주요 기능
+## 핵심 기능
 
-- 센서 CSV 업로드 예측
-- XGBoost 기반 고장 확률 및 High Risk 판정
-- Predictive SPC risk trend / control chart
-- SHAP 기반 row별 위험요인 요약
-- Gemini 또는 OpenAI 기반 GenAI 관리자 참고 리포트
-- field-event 입력, 작업지시 초안, 승인/검토/반려 기록
-- 별도 Admin 콘솔에서 모델/검증/연구 산출물 확인
-- SMOTE, threshold tuning, SPC-only 대비 ML+SPC 비교 실험
+- AI4I형 CSV 자동 감지 및 기본 고장확률 예측
+- SCANIA형 CSV 자동 감지 및 공식 cost matrix 기반 비용 최적화 예측
+- 제품 앱에서 `자동 감지`, `기본 센서 모델`, `SCANIA 비용 모델` 선택
+- CSV 품질 진단, 위험 우선순위, 결과 CSV 저장
+- Gemini 또는 OpenAI API key를 세션에서만 입력해 AI 관리자 리포트 생성
+- 작업지시 초안 생성과 승인/검토/반려 기록
+- Streamlit Admin 콘솔에서 모델 검증, 공개 benchmark, 회사 데이터 실증 템플릿 확인
 
-## 폴더 구조
+## 실행 모드
+
+| 구분 | 용도 | 설명 |
+| --- | --- | --- |
+| 빠른 점검 모드 | 작은 설치본, 일상 점검, 시연 | 경량 운영 점수 기반입니다. 정밀 분석 결과와 다를 수 있습니다. |
+| 정밀 분석 모드 | XGBoost/SHAP 기반 정밀 분석 | 기본 센서 모델과 SCANIA 비용 모델을 사용합니다. |
+| Admin 콘솔 | 연구/검증/benchmark 확인 | 제품 앱에는 보이지 않는 검증 자료와 실증 리포트를 확인합니다. |
+
+## 데이터 스키마
+
+### AI4I형 CSV
+
+기본 입력 컬럼은 AI4I 2020 형식입니다.
 
 ```text
-.
-├─ app/
-│  ├─ dashboard.py          # 사용자용 제품형 MVP Streamlit 앱
-│  └─ admin_dashboard.py    # 관리자/검증용 Streamlit 콘솔
-├─ data/
-│  └─ ai4i2020.csv
-├─ outputs/
-│  ├─ metrics.json
-│  ├─ baseline_predictions.csv
-│  ├─ threshold_summary.json
-│  ├─ spc_summary.json
-│  ├─ spc_timeseries.csv
-│  ├─ ai_manager_report.md
-│  └─ ...
-├─ src/
-│  ├─ train_baseline.py
-│  ├─ stage4_explain.py
-│  ├─ predictive_spc.py
-│  ├─ future_deviation.py
-│  ├─ api_server.py
-│  ├─ realtime_ops.py
-│  ├─ compare_model_strategies.py
-│  ├─ compare_spc_ml_alerts.py
-│  └─ verify_project.py
-├─ streamlit_app.py         # Streamlit Cloud/Hugging Face 기본 entrypoint
-├─ run_dashboard.bat
-├─ run_admin_dashboard.bat
-├─ run_stage1_20_gemini.ps1
-├─ run_stage1_20_openai.ps1
-├─ run_verify.bat
-└─ requirements.txt
+Type
+Air temperature [K]
+Process temperature [K]
+Rotational speed [rpm]
+Torque [Nm]
+Tool wear [min]
 ```
 
-## 설치
+제품 앱은 일부 회사식 컬럼명과 단위 변환을 지원합니다. 예를 들어 `air_temp`, `온도`, `rpm`, `회전속도` 같은 컬럼명은 가능한 범위에서 자동 매핑합니다.
 
-Windows PowerShell 또는 명령 프롬프트에서 저장소 폴더로 이동한 뒤 실행합니다.
+### SCANIA형 CSV
+
+SCANIA Component X 형식은 `vehicle_id`, `time_step`, 다수의 익명 센서/상태 컬럼을 포함합니다. 제품 앱은 SCANIA형 컬럼 구조를 감지하면 SCANIA cost-sensitive 모델 경로로 예측합니다.
+
+SCANIA 모델 artifact는 아래 명령으로 생성합니다.
+
+```powershell
+.\.venv\Scripts\python.exe src\scania_official_cost_validation.py
+```
+
+생성 파일:
+
+```text
+outputs/scania_cost_optimized_model.joblib
+```
+
+이 파일이 없으면 SCANIA 비용 최적화 예측은 실행할 수 없습니다.
+
+## 개발 환경 설치
+
+Windows PowerShell에서 저장소 루트로 이동한 뒤 실행합니다.
 
 ```powershell
 py -3 -m venv .venv
@@ -61,236 +67,142 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-이미 `.venv`가 준비되어 있다면 설치 단계는 다시 실행하지 않아도 됩니다.
+## 데스크톱 앱 실행
 
-## 사용자 앱 실행
+운영자용 사용 절차는 [docs/USER_MANUAL.md](docs/USER_MANUAL.md)에 정리되어 있습니다.
 
-사용자 앱은 operator 로그인을 요구합니다. 비밀번호는 환경변수나 Streamlit secrets로만 설정하고 Git에 저장하지 않습니다.
-
-PowerShell 예시:
+정밀 분석 모드:
 
 ```powershell
-$env:APP_OPERATOR_PASSWORD="your-operator-password"
+.\.venv\Scripts\python.exe desktop_app\main.py
 ```
+
+또는:
 
 ```powershell
-.\run_dashboard.bat
+.\run_desktop_app.bat
 ```
 
-브라우저에서 아래 주소를 엽니다.
-
-```text
-http://127.0.0.1:8501
-```
-
-사용자 앱은 제품형 MVP 화면만 보여줍니다.
-
-1. `시작하기`
-2. `성과 요약`
-3. `CSV 예측`
-4. `SPC 그래프`
-5. `GenAI 리포트`
-6. `작업지시`
-7. `적용 범위`
-
-## Admin 콘솔 실행
-
-개발/검증용 상세 탭은 사용자 앱에서 숨기지 않고 별도 앱으로 분리했습니다.
-
-Admin 콘솔은 admin 로그인을 요구합니다.
+빠른 점검 모드:
 
 ```powershell
-$env:APP_ADMIN_PASSWORD="your-admin-password"
+.\.venv\Scripts\python.exe desktop_app\lite_main.py
 ```
+
+## Streamlit Admin 콘솔
+
+Admin 콘솔은 연구/검증/benchmark/회사 데이터 실증 템플릿 확인용입니다.
 
 ```powershell
 .\run_admin_dashboard.bat
 ```
 
-브라우저에서 아래 주소를 엽니다.
+기본 주소:
 
 ```text
 http://127.0.0.1:8502
 ```
 
-Admin 콘솔에서는 모델 비교, threshold 조정, SHAP, row 시뮬레이션, 비교 실험, 연구 문서, 검증 산출물을 확인합니다.
+## 설치파일 빌드
 
-Admin 콘솔 상단의 운영 모니터링 영역에서는 DB 상태, 최근 event/draft/decision 수, 감사 로그, 주요 산출물 상태, API key 패턴 스캔 결과를 확인합니다.
-
-## CSV 입력 형식
-
-사용자 앱의 `CSV 예측` 탭은 Smart CSV Wizard로 동작합니다. AI4I형 컬럼을 그대로 넣어도 되고, 회사별 컬럼명이 다른 CSV를 넣어도 자동 매핑 후보를 먼저 보여줍니다.
-
-```csv
-Type,Air temperature [K],Process temperature [K],Rotational speed [rpm],Torque [Nm],Tool wear [min]
-L,298.1,308.6,1551,42.8,0
-M,298.2,308.7,1408,46.3,3
-H,299.4,309.2,1320,58.2,120
-```
-
-회사형 예시:
-
-```csv
-product_grade,air_temp_c,process_temp_c,rpm,motor_torque_nm,wear_minutes
-L,25.0,35.4,1551,42.8,0
-M,26.1,36.6,1408,46.3,3
-H,30.2,39.8,1320,58.2,120
-```
-
-처리 흐름:
-
-```text
-CSV 업로드
-→ 컬럼 자동 매핑 확인/수정
-→ Celsius/Kelvin 등 단위 변환
-→ 결측값, 숫자 변환 실패, 이상 범위, 중복 row 품질 진단
-→ AI4I 기준 전처리 및 one-hot feature 정렬
-→ XGBoost raw probability와 calibrated probability 계산
-→ 운영 정책별 threshold 기준 High Risk 판정
-→ 위험 우선순위, 추천 조치, 예측 결과 CSV 제공
-```
-
-라벨 없는 회사 CSV는 예측과 품질 진단만 제공합니다. 실제 회사 데이터 성능 검증 완료라고 주장하려면 고장/정상 라벨이 포함된 CSV로 별도 재학습/평가를 수행해야 합니다.
-
-## GenAI API key
-
-사용자 앱 왼쪽 사이드바에서 Gemini 또는 OpenAI를 선택하고 API key를 입력하면 `GenAI 리포트` 탭에서 새 관리자 참고 리포트를 생성할 수 있습니다.
-
-- API key는 현재 Streamlit 세션에서만 사용합니다.
-- API key는 파일, `.env`, Git 기록에 저장하지 않습니다.
-- API key가 없으면 저장된 기본 리포트만 표시합니다.
-
-전체 파이프라인을 Gemini API로 다시 실행하려면:
+Full 설치본:
 
 ```powershell
-.\run_stage1_20_gemini.ps1
+.\build_desktop_app.bat
+.\build_desktop_installer.bat
 ```
 
-OpenAI API로 실행하려면:
+Lite 설치본:
 
 ```powershell
-.\run_stage1_20_openai.ps1
+.\build_desktop_lite_app.bat
+.\build_desktop_lite_installer.bat
 ```
 
-성공 시 `outputs/ai_report_context.json`의 `report_generation_mode`는 아래 중 하나로 저장됩니다.
+생성되는 `release/*.exe` 파일은 Git 커밋 대상이 아닙니다. GitHub Release 첨부 파일로만 배포합니다.
 
-```text
-gemini_generate_content:<model>
-openai_responses_api:<model>
-```
+## 업데이트와 오류 로그
 
-## 로컬 API
+데스크톱 앱의 좌측 하단 `업데이트 확인` 버튼은 GitHub Release의 최신 버전을 확인하고, 새 버전이 있으면 Release 페이지를 열도록 안내합니다. v1에서는 무인 자동 설치나 백그라운드 교체를 하지 않습니다.
 
-FastAPI 서버를 실행합니다.
+오류가 발생했을 때는 앱의 `오류 로그 내보내기` 버튼 또는 아래 명령으로 crash log ZIP을 만들 수 있습니다.
 
 ```powershell
-.\run_api.bat
+.\.venv\Scripts\python.exe desktop_app\main.py --export-crash-logs
+.\.venv\Scripts\python.exe desktop_app\lite_main.py --export-crash-logs
 ```
 
-문서 UI:
+오류 로그 위치는 `%LOCALAPPDATA%\MaintiQ Predict\logs\`입니다. API key와 비밀번호는 의도적으로 저장하지 않습니다.
 
-```text
-http://127.0.0.1:8000/docs
-```
-
-주요 endpoint:
-
-- `GET /health`
-- `GET /model-info`
-- `POST /predict`
-- `POST /predict-batch`
-- `POST /field-event`
-- `POST /work-order-draft`
-- `POST /work-order-decision`
-
-`/work-order-decision`은 `approve`, `reject`, `needs_review` 중 하나를 기록합니다. 자동 정비 명령을 실행하지 않고, 사람이 승인하는 작업지시 workflow만 저장합니다.
-
-## 논문 검증 근거 생성
-
-모델 전략, alert 전략, 운영 가치 시뮬레이션, 제품 기능 비교, workflow traceability를 생성하려면 아래 명령을 실행합니다.
+## 검증 명령
 
 ```powershell
-.\.venv\Scripts\python.exe src\compare_model_strategies.py
-.\.venv\Scripts\python.exe src\compare_spc_ml_alerts.py
-.\.venv\Scripts\python.exe src\evaluate_operational_value.py
-.\.venv\Scripts\python.exe src\verify_preprocessing_prediction_engine.py
-.\.venv\Scripts\python.exe src\evaluate_workflow_traceability.py
-.\.venv\Scripts\python.exe src\create_product_comparison_summary.py
-```
-
-주요 산출물:
-
-- `outputs/model_strategy_comparison.csv`
-- `outputs/model_strategy_summary.md`
-- `outputs/model_strategy_pr_curve.png`
-- `outputs/spc_vs_ml_comparison.csv`
-- `outputs/spc_vs_ml_summary.md`
-- `outputs/operational_value_simulation.csv`
-- `outputs/operational_value_simulation.png`
-- `outputs/product_capability_comparison.md`
-- `outputs/workflow_traceability_summary.md`
-- `outputs/thesis_evidence_pack.md`
-- `outputs/company_input_quality_report.csv`
-- `outputs/company_prediction_results.csv`
-- `outputs/company_risk_priority_queue.csv`
-- `outputs/probability_calibration_metrics.json`
-- `outputs/probability_calibration_curve.png`
-- `outputs/operating_policy_thresholds.json`
-
-비교 결과는 SMOTE나 특정 threshold가 항상 좋다는 주장을 강제하지 않습니다. precision, recall, F1-score, PR-AUC, alert count, false alarm count의 trade-off를 확인하기 위한 근거입니다.
-
-운영 가치 시뮬레이션은 실제 원화 비용 절감 실증이 아니라 false alarm, missed failure, planned action에 상대 가중치를 둔 normalized cost simulation입니다. 논문에서는 `85% 시간 단축`, `30% 비용 절감`, `실제 공장 ROI 검증`처럼 쓰지 않습니다.
-
-상용 제품 비교는 IBM Maximo, AWS IoT SiteWise, Azure IoT Operations, Siemens Insights Hub를 기능적 참조 시스템으로 둡니다. 본 시스템이 상용 플랫폼보다 전체적으로 우월하다고 주장하지 않고, 연구 재현성, ML+SPC 비교, SHAP/GenAI 설명, 승인형 작업지시 workflow 연결성을 차별점으로 설명합니다.
-
-## 검증
-
-기본 검증:
-
-```powershell
-.\run_verify.bat
-```
-
-개별 검증:
-
-```powershell
-.\.venv\Scripts\python.exe -m compileall -q src app
+.\.venv\Scripts\python.exe -m compileall -q src app desktop_app tools streamlit_app.py
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe desktop_app\main.py --check
+.\.venv\Scripts\python.exe desktop_app\main.py --engine-smoke-test
+.\.venv\Scripts\python.exe desktop_app\main.py --workflow-smoke-test
+.\.venv\Scripts\python.exe desktop_app\main.py --click-workflow-test
+.\.venv\Scripts\python.exe desktop_app\lite_main.py --workflow-smoke-test
+.\.venv\Scripts\python.exe desktop_app\lite_main.py --click-workflow-test
 .\.venv\Scripts\python.exe src\verify_project.py
-.\.venv\Scripts\python.exe src\verify_stage19_20_integration.py
+cmd /c "run_verify.bat < NUL"
 ```
 
-정상 상태에서는 `All project verification checks passed.`가 출력됩니다.
+GitHub 업로드 전 범위 확인:
 
-## Streamlit Cloud / Hugging Face Spaces 배포
+```powershell
+.\.venv\Scripts\python.exe tools\check_github_upload_scope.py
+.\.venv\Scripts\python.exe tools\list_github_upload_candidates.py
+```
 
-배포 플랫폼의 app file은 기본적으로 아래 파일을 사용합니다.
+## GitHub 업로드 범위
+
+Git에 포함:
+
+- `src/`, `app/`, `desktop_app/`, `tools/`, `installer/`, `tests/`
+- `samples/`
+- `data/ai4i2020.csv`
+- `README.md`, `AGENTS.md`, `GITHUB_UPLOAD_SCOPE.md`, `CHANGELOG.md`
+- 실행 및 빌드 스크립트
+
+Git에 포함하지 않음:
+
+- `.venv/`
+- `build/`, `dist/`, `release/`, `*.spec`
+- `.env`, key 파일, secret 파일
+- `outputs/operations.db`
+- `outputs/realtime_stream/`
+- `outputs/work_order_drafts/`
+- 대량 또는 재생성 가능한 `outputs/` 산출물
+- `data_external/`
+- 실제 회사 원본 데이터
+- `local_presentation_notes/`
+
+대부분의 `outputs/`는 재생성 산출물이므로 저장소에 커밋하지 않습니다. GitHub에는 코드, 샘플, 템플릿, 핵심 문서만 남기고, 예측 CSV/그래프/스크린샷/benchmark dump는 로컬에서 검증 명령으로 다시 생성합니다.
+
+업로드 전 권장 커밋 메시지:
 
 ```text
-streamlit_app.py
+Finalize MaintiQ Predict desktop MVP packaging and validation tooling
 ```
 
-Streamlit Cloud:
+## 주장 범위
 
-1. GitHub에 저장소를 push합니다.
-2. Streamlit Cloud에서 새 app을 만들고 repository를 선택합니다.
-3. app file을 `streamlit_app.py`로 지정합니다.
-4. platform secrets에 `APP_OPERATOR_PASSWORD`를 등록합니다.
-5. Gemini/OpenAI API를 사용할 경우 platform secrets에 `GEMINI_API_KEY` 또는 `OPENAI_API_KEY`를 등록합니다.
+현재 구현으로 말할 수 있는 것:
 
-Hugging Face Spaces:
+- 공개 데이터 기반 예지보전 데스크톱 MVP를 구현했습니다.
+- AI4I형 CSV와 SCANIA형 CSV를 구분해 서로 다른 예측 경로를 실행합니다.
+- SCANIA 공개 benchmark에서는 공식 cost matrix 기준으로 rule baseline 대비 비용 metric 개선을 계산할 수 있습니다.
+- 회사 데이터 실증용 입력 템플릿과 리포트 export 구조를 제공합니다.
 
-1. 새 Space를 만들고 SDK를 `Streamlit`으로 선택합니다.
-2. 저장소 파일을 업로드하거나 GitHub 저장소를 연결합니다.
-3. secrets에 `APP_OPERATOR_PASSWORD`를 등록합니다.
-4. Gemini/OpenAI API를 사용할 경우 secrets에 API key를 등록합니다.
-5. 운영 DB, `.venv`, `.env`, 실제 회사 원본 데이터는 업로드하지 않습니다.
+현재 구현만으로 말하면 안 되는 것:
 
-클라우드에서 화면이 열린다는 것은 웹 데모 배포를 의미합니다. 실제 공장 센서 연결, PLC/SCADA 운영, 자동 정비 명령 실행이 완료되었다는 뜻은 아닙니다.
+- 실제 PLC/SCADA 운영망 연결 완료
+- 실제 공장 센서 실시간 운영 배포
+- 실제 회사 데이터 성능 재검증 완료
+- 실제 비용 절감률 또는 탐지 시간 단축률 실증 완료
+- 자동 정비 명령 실행
+- 완성된 상용 SaaS 플랫폼
 
-## 보안 및 적용 범위
-
-- API key를 코드, README, `.env`, Git 기록에 저장하지 않습니다.
-- operator/admin password를 코드, README, `.env`, Git 기록에 저장하지 않습니다.
-- GenAI 출력은 관리자 참고용입니다. 자동 정비 명령으로 사용하지 않습니다.
-- AI4I row playback은 실제 실시간 센서 스트림이 아니라 공개 데이터 기반 시뮬레이션입니다.
-- 실제 현장 적용 전에는 회사 데이터 계약, 단위 표준화, 보안 승인, 접근 제어, 운영 DB, 감사 로그, threshold 재검증이 필요합니다.
+실제 비용 절감이나 탐지 시간 단축을 주장하려면 회사의 labeled sensor CSV, 정비 이력, downtime, 비용 로그가 필요합니다.

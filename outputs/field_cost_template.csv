@@ -1,0 +1,2 @@
+﻿work_order_id,equipment_id,maintenance_start,maintenance_end,downtime_minutes,parts_cost,labor_cost,lost_production_cost,baseline_downtime_minutes,new_policy_downtime_minutes,baseline_detection_delay_minutes,new_policy_detection_delay_minutes,baseline_total_cost,new_policy_total_cost,planned_action,false_alarm,missed_failure,baseline_policy,new_policy
+wo-0001,press-01,2026-05-07T16:00:00+09:00,2026-05-07T17:20:00+09:00,80,150000,90000,300000,110,80,60,18,620000,540000,1,0,0,rule_based_threshold,ml_spc_genai_workflow

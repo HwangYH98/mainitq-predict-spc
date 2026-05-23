@@ -129,6 +129,51 @@ EVIDENCE_FILES = [
         "path": "outputs/company_risk_priority_queue.csv",
         "paper_use": "Risk-prioritized operator workflow evidence",
     },
+    {
+        "artifact": "Industrial engineering evidence",
+        "path": "outputs/industrial_engineering_evidence.md",
+        "paper_use": "OEE/MTBF/MTTR, FMEA/RPN, SPC, cost simulation, and risk-priority formula",
+    },
+    {
+        "artifact": "Open industrial validation metrics",
+        "path": "outputs/open_industrial_validation_metrics.csv",
+        "paper_use": "Public industrial dataset adapter, alert strategy comparison, and lead-time/cost simulation",
+    },
+    {
+        "artifact": "Open industrial lead-time report",
+        "path": "outputs/open_industrial_lead_time_report.md",
+        "paper_use": "Early-warning lead-time definition and strategy comparison",
+    },
+    {
+        "artifact": "Public industrial benchmark metrics",
+        "path": "outputs/public_industrial_validation_metrics.csv",
+        "paper_use": "MetroPT-3, C-MAPSS, IMS, and FEMTO-style alert strategy comparison",
+    },
+    {
+        "artifact": "Public industrial RUL metrics",
+        "path": "outputs/public_industrial_rul_metrics.csv",
+        "paper_use": "RUL RMSE/MAE and NASA-style score comparison on public benchmark adapters",
+    },
+    {
+        "artifact": "Public benchmark claims",
+        "path": "outputs/public_benchmark_claims.md",
+        "paper_use": "Claim guardrails for public benchmark versus field proof",
+    },
+    {
+        "artifact": "SCANIA official cost metrics",
+        "path": "outputs/scania_official_cost_metrics.csv",
+        "paper_use": "Public benchmark class 0~4 official cost metric and rule-baseline improvement",
+    },
+    {
+        "artifact": "SCANIA official cost report",
+        "path": "outputs/scania_official_cost_report.md",
+        "paper_use": "Thesis-safe official cost metric claim and alert-burden guardrail",
+    },
+    {
+        "artifact": "Field validation protocol",
+        "path": "outputs/field_validation_protocol.md",
+        "paper_use": "Required field-data protocol for future real cost and lead-time proof",
+    },
 ]
 
 
@@ -223,8 +268,10 @@ def write_evidence_pack(comparison: pd.DataFrame) -> None:
             "",
             (
                 "Rather than claiming superiority over commercial platforms, the thesis compares transparent "
-                "model strategies and alert policies on the same AI4I test split, then shows how the selected "
-                "risk signal is connected to explanation and human-approved work-order decisions."
+                "model strategies and alert policies on the same AI4I test split, adds SCANIA official-cost "
+                "evidence and public benchmark adapters for MetroPT-3, C-MAPSS, IMS, and FEMTO-style data, "
+                "then shows how the selected risk signal is connected to explanation and human-approved "
+                "work-order decisions."
             ),
             "",
         ]
