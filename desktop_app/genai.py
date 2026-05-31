@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
 import os
-import urllib.error
-import urllib.request
 
 from desktop_app.config import (
     GEMINI_ADVANCED_MODELS,
@@ -68,6 +65,7 @@ def resolve_genai_connection(api_key: str, mode: str, prompt: str = "Reply with:
             "GEMINI_MODEL",
             "OPENAI_MODEL",
             "GEMINI_MODEL_CANDIDATES",
+            "OPENAI_MODEL_CANDIDATES",
         ]
     )
     errors: list[str] = []
@@ -88,36 +86,28 @@ def resolve_genai_connection(api_key: str, mode: str, prompt: str = "Reply with:
                     )
                     if text.strip():
                         return {"provider": provider, "model": resolved_model, "mode": mode}
+                    errors.append(f"{model}: empty_response")
                 except Exception as error:
                     errors.append(f"{model}: {error}")
         else:
             from predictive_spc import (
-                OPENAI_RESPONSES_URL,
-                build_openai_headers,
-                build_openai_payload,
-                extract_response_text,
-                format_openai_http_error,
+                call_openai_responses_api,
             )
 
             os.environ["OPENAI_API_KEY"] = api_key
-            for model in candidates:
-                try:
-                    os.environ["OPENAI_MODEL"] = model
-                    payload = build_openai_payload(prompt, max_output_tokens=40)
-                    request = urllib.request.Request(
-                        OPENAI_RESPONSES_URL,
-                        data=json.dumps(payload).encode("utf-8"),
-                        headers=build_openai_headers(api_key),
-                        method="POST",
-                    )
-                    with urllib.request.urlopen(request, timeout=20) as response:
-                        response_payload = json.loads(response.read().decode("utf-8"))
-                    if extract_response_text(response_payload).strip():
-                        return {"provider": provider, "model": model, "mode": mode}
-                except urllib.error.HTTPError as error:
-                    errors.append(f"{model}: {format_openai_http_error(error)}")
-                except Exception as error:
-                    errors.append(f"{model}: {error}")
+            os.environ["OPENAI_MODEL_CANDIDATES"] = ",".join(candidates)
+            try:
+                text, resolved_model = call_openai_responses_api(
+                    api_key,
+                    prompt,
+                    max_output_tokens=40,
+                    timeout=20,
+                )
+                if text.strip():
+                    return {"provider": provider, "model": resolved_model, "mode": mode}
+                errors.append("OpenAI: empty_response")
+            except Exception as error:
+                errors.append(str(error))
     finally:
         restore_env(old_env)
 

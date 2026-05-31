@@ -40,6 +40,9 @@ if not errorlevel 1 (
 )
 
 if not defined ISCC (
+    if exist "tools\inno_setup_6\ISCC.exe" set "ISCC=tools\inno_setup_6\ISCC.exe"
+)
+if not defined ISCC (
     if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 )
 if not defined ISCC (

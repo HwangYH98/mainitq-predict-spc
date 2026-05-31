@@ -49,6 +49,8 @@ def make_card(title: str, value: str, note: str = "", tone: str = "default") -> 
 def _operator_error_message(error: Exception) -> tuple[str, str]:
     message = str(error).strip() or error.__class__.__name__
     lowered = message.lower()
+    if "insufficient_quota" in lowered or "quota" in lowered or "billing" in lowered:
+        return message, "OpenAI billing/usage 한도를 확인하거나, 무료 사용 가능한 Gemini key로 다시 실행하세요."
     if isinstance(error, FileNotFoundError) or "not found" in lowered or "no such file" in lowered:
         return message, "파일 위치가 올바른지 확인하고, 샘플 CSV로 형식을 먼저 확인하세요."
     if "필수 컬럼" in message or "missing" in lowered or "column" in lowered:

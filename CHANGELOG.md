@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2 - 2026-05-31
+
+- Updated Gemini/OpenAI model fallback handling and clearer quota/model-access errors.
+- Verified final GenAI report evidence with `gemini-2.5-flash` for submitted materials.
+- Kept API keys session-only and excluded them from reports, history, and release assets.
+- Refreshed Full/Lite installer metadata and GitHub release URLs.
+
 ## 1.1.1 - 2026-05-13
 
 - Added clearer Full/Lite result provenance fields to prediction CSV outputs.

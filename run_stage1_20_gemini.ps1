@@ -62,10 +62,10 @@ try {
     Write-Host "Gemini API key was received but not saved to any file." -ForegroundColor Cyan
 
     if ([string]::IsNullOrWhiteSpace($env:GEMINI_MODEL)) {
-        $env:GEMINI_MODEL = "gemini-2.5-flash"
+        $env:GEMINI_MODEL = "gemini-3.5-flash"
     }
     if ([string]::IsNullOrWhiteSpace($env:GEMINI_MODEL_CANDIDATES)) {
-        $env:GEMINI_MODEL_CANDIDATES = "$env:GEMINI_MODEL,gemini-2.5-flash-lite"
+        $env:GEMINI_MODEL_CANDIDATES = "$env:GEMINI_MODEL,gemini-2.5-flash,gemini-2.5-flash-lite"
     }
 
     $env:AI_REPORT_PROVIDER = "gemini"

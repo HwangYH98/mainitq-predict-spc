@@ -433,19 +433,24 @@ def generate_ai_report(api_key: str, summary: dict[str, Any]) -> tuple[str, str]
         "Mention that this is advisory and requires human approval."
     )
     if provider == "gemini":
-        model = "gemini-2.5-flash"
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"maxOutputTokens": 500}}
-        request = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            body = json.loads(response.read().decode("utf-8"))
-        text = body["candidates"][0]["content"]["parts"][0]["text"].strip()
-        return text, f"gemini_generate_content:{model}"
+        last_error: Exception | None = None
+        for model in ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"]:
+            url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent"
+            payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"maxOutputTokens": 500}}
+            request = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    body = json.loads(response.read().decode("utf-8"))
+                text = body["candidates"][0]["content"]["parts"][0]["text"].strip()
+                return text, f"gemini_generate_content:{model}"
+            except Exception as error:
+                last_error = error
+        raise RuntimeError(f"Gemini report generation failed for all free-tier candidates: {last_error}")
 
     model = "gpt-5-mini"
     payload = {

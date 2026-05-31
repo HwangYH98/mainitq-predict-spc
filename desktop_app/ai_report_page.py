@@ -283,6 +283,8 @@ class AIReportPage(QWidget):
         QMessageBox.information(self, "저장 완료", f"리포트를 저장했습니다.\n{path}")
 
     def friendly_error_message(self, error_type: str, raw_message: str) -> str:
+        if error_type == "quota_error":
+            return "OpenAI 사용량 한도 또는 결제 크레딧이 부족합니다. OpenAI billing/usage를 확인하거나 Gemini key로 실행하세요."
         messages = {
             "key_format_error": "API key 형식을 인식하지 못했습니다. Gemini 또는 OpenAI key인지 확인하세요.",
             "connection_failed": "네트워크 또는 API 연결에 실패했습니다. 인터넷 연결과 서비스 상태를 확인하세요.",

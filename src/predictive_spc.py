@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -32,10 +33,11 @@ AI_REPORT_PATH = OUTPUT_DIR / "ai_manager_report.md"
 FUTURE_PREDICTIONS_PATH = OUTPUT_DIR / "future_deviation_predictions.csv"
 FUTURE_METRICS_PATH = OUTPUT_DIR / "future_deviation_metrics.json"
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
-DEFAULT_OPENAI_MODEL = "gpt-5-mini"
-GEMINI_GENERATE_CONTENT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-DEFAULT_GEMINI_FALLBACK_MODELS = ["gemini-2.5-flash-lite"]
+DEFAULT_OPENAI_MODEL = "gpt-5.2"
+DEFAULT_OPENAI_FALLBACK_MODELS = ["gpt-5-mini", "gpt-5-nano", "gpt-4.1-mini", "gpt-4o-mini"]
+GEMINI_GENERATE_CONTENT_BASE_URL = "https://generativelanguage.googleapis.com/v1/models"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
+DEFAULT_GEMINI_FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 DEFAULT_AI_REPORT_PROVIDER = "gemini"
 TRANSIENT_API_STATUS_CODES = {429, 500, 502, 503, 504}
 
@@ -545,6 +547,22 @@ def openai_model_name() -> str:
     return os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
 
 
+def openai_model_candidates() -> list[str]:
+    """Return OpenAI Responses API models to try from highest current model down."""
+    configured = os.environ.get("OPENAI_MODEL_CANDIDATES", "").strip()
+    if configured:
+        raw_models = configured.split(",")
+    else:
+        raw_models = [openai_model_name(), *DEFAULT_OPENAI_FALLBACK_MODELS]
+
+    candidates = []
+    for raw_model in raw_models:
+        model = raw_model.strip()
+        if model and model not in candidates:
+            candidates.append(model)
+    return candidates or [DEFAULT_OPENAI_MODEL]
+
+
 def gemini_model_name() -> str:
     """Return the Gemini model, allowing a terminal-only override."""
     model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
@@ -607,10 +625,11 @@ def build_gemini_headers(api_key: str) -> dict:
     }
 
 
-def build_openai_payload(input_text: str, max_output_tokens: int = 4096) -> dict:
+def build_openai_payload(input_text: str, max_output_tokens: int = 4096, model: str | None = None) -> dict:
     """Create the official Responses API payload used by reports and preflight."""
-    return {
-        "model": openai_model_name(),
+    selected_model = model or openai_model_name()
+    payload = {
+        "model": selected_model,
         "instructions": (
             "You write concise industrial engineering reports. Stay grounded in "
             "the provided evidence and include limitations."
@@ -618,27 +637,24 @@ def build_openai_payload(input_text: str, max_output_tokens: int = 4096) -> dict
         "input": input_text,
         "max_output_tokens": max_output_tokens,
         "truncation": "auto",
-        "reasoning": {"effort": "low"},
     }
+    if selected_model.startswith(("gpt-5", "o")):
+        payload["reasoning"] = {"effort": "low"}
+    return payload
 
 
 def build_gemini_payload(input_text: str, max_output_tokens: int = 4096) -> dict:
     """Create the Gemini generateContent payload used by reports and preflight."""
+    guided_input = (
+        "System instruction: You write concise industrial engineering reports. "
+        "Stay grounded in the provided evidence and include limitations.\n\n"
+        f"{input_text}"
+    )
     return {
-        "system_instruction": {
-            "parts": [
-                {
-                    "text": (
-                        "You write concise industrial engineering reports. "
-                        "Stay grounded in the provided evidence and include limitations."
-                    )
-                }
-            ]
-        },
         "contents": [
             {
                 "role": "user",
-                "parts": [{"text": input_text}],
+                "parts": [{"text": guided_input}],
             }
         ],
         "generationConfig": {
@@ -680,6 +696,7 @@ def format_openai_http_error(error: urllib.error.HTTPError) -> str:
         error_code = openai_error.get("code")
         param = openai_error.get("param")
         if message:
+            message = re.sub(r"sk-[A-Za-z0-9_-]+", "[redacted-openai-key]", message)
             lines.append(f"error_message: {message}")
         if error_type:
             lines.append(f"error_type: {error_type}")
@@ -691,6 +708,62 @@ def format_openai_http_error(error: urllib.error.HTTPError) -> str:
         lines.append(f"error: {openai_error}")
 
     return "\n".join(lines)
+
+
+def is_openai_account_blocking_error(error_detail: str) -> bool:
+    """Return True when retrying other models cannot fix the OpenAI failure."""
+    return (
+        "invalid_api_key" in error_detail
+        or "incorrect api key" in error_detail.lower()
+        or "insufficient_quota" in error_detail
+    )
+
+
+def call_openai_responses_api(
+    api_key: str,
+    input_text: str,
+    max_output_tokens: int = 4096,
+    timeout: int = 45,
+) -> tuple[str, str]:
+    """Call OpenAI Responses API, trying the highest accessible model first."""
+    errors: list[str] = []
+    for model in openai_model_candidates():
+        payload = build_openai_payload(input_text, max_output_tokens=max_output_tokens, model=model)
+        request = urllib.request.Request(
+            OPENAI_RESPONSES_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=build_openai_headers(api_key),
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                response_payload = json.loads(response.read().decode("utf-8"))
+            text = extract_response_text(response_payload)
+            if text:
+                return text, model
+            errors.append(f"model={model}: empty_response")
+        except urllib.error.HTTPError as error:
+            error_detail = format_openai_http_error(error)
+            errors.append(f"model={model}: {error_detail}")
+            if error.code == 401 or is_openai_account_blocking_error(error_detail):
+                if "insufficient_quota" in error_detail:
+                    raise RuntimeError(
+                        "OpenAI account quota is exhausted or billing is not available for this key. "
+                        "Model fallback cannot fix an account-level quota block.\n"
+                        f"{error_detail}"
+                    ) from error
+                raise RuntimeError(
+                    "OpenAI API key was rejected. Check that the key is valid, active, "
+                    "and copied from https://platform.openai.com/api-keys.\n"
+                    f"{error_detail}"
+                ) from error
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            errors.append(f"model={model}: network_error: {error}")
+
+    raise RuntimeError(
+        "OpenAI API call failed for all model candidates.\n"
+        + "\n\n".join(errors[-6:])
+    )
 
 
 def format_gemini_http_error(error: urllib.error.HTTPError) -> str:
@@ -759,7 +832,7 @@ def call_gemini_generate_content(
                 error_detail = format_gemini_http_error(error)
                 errors.append(f"model={model}, attempt={attempt}: {error_detail}")
                 if error.code not in TRANSIENT_API_STATUS_CODES:
-                    raise RuntimeError(error_detail) from error
+                    break
                 if attempt == 1:
                     time.sleep(2)
             except (urllib.error.URLError, TimeoutError, OSError) as error:
@@ -790,36 +863,22 @@ def openai_ai_report(context: dict, require_openai: bool = False) -> tuple[str, 
             )
         return fallback_ai_report(context, "OPENAI_API_KEY not set"), "fallback_no_api_key"
 
-    model = openai_model_name()
-    payload = build_openai_payload(build_llm_prompt(context), max_output_tokens=4096)
-    request = urllib.request.Request(
-        OPENAI_RESPONSES_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=build_openai_headers(api_key),
-        method="POST",
-    )
-
     try:
-        with urllib.request.urlopen(request, timeout=45) as response:
-            response_payload = json.loads(response.read().decode("utf-8"))
-        report = extract_response_text(response_payload)
+        report, model = call_openai_responses_api(
+            api_key,
+            build_llm_prompt(context),
+            max_output_tokens=4096,
+            timeout=45,
+        )
         if not report:
             if require_openai:
                 raise RuntimeError("OpenAI Responses API returned no report text.")
             return fallback_ai_report(context, "OpenAI response had no text"), "fallback_empty_response"
         return report, f"openai_responses_api:{model}"
-    except urllib.error.HTTPError as error:
-        error_detail = format_openai_http_error(error)
-        if require_openai:
-            raise RuntimeError(
-                "OpenAI API call failed while require_openai=True.\n"
-                f"{error_detail}"
-            ) from error
-        return fallback_ai_report(context, error_detail), "fallback_api_error"
-    except (urllib.error.URLError, TimeoutError, OSError) as error:
+    except RuntimeError as error:
         if require_openai:
             raise RuntimeError(f"OpenAI API call failed while require_openai=True: {error}") from error
-        return fallback_ai_report(context, f"OpenAI API call failed: {error}"), "fallback_api_error"
+        return fallback_ai_report(context, str(error)), "fallback_api_error"
 
 
 def gemini_ai_report(context: dict, require_gemini: bool = False) -> tuple[str, str]:

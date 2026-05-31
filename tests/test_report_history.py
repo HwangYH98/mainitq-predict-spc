@@ -62,3 +62,4 @@ def test_report_snapshot_and_error_classification(tmp_path: Path, monkeypatch) -
     assert snapshot.read_text(encoding="utf-8") == "manager report body"
     assert classify_report_error("API key format error") == "key_format_error"
     assert classify_report_error("model permission denied") == "model_access_error"
+    assert classify_report_error("error_code: insufficient_quota") == "quota_error"

@@ -1,5 +1,5 @@
 param(
-    [string]$Model = "gemini-2.5-flash"
+    [string]$Model = "gemini-3.5-flash"
 )
 
 $ErrorActionPreference = "Stop"

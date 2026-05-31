@@ -1,5 +1,5 @@
 #define MyAppName "MaintiQ Predict"
-#define MyAppVersion "1.1.1"
+#define MyAppVersion "1.1.2"
 #define MyAppPublisher "MaintiQ"
 #define MyAppExeName "MaintiQ_Predict.exe"
 
@@ -8,9 +8,9 @@ AppId={{6C64B38B-9B55-49FA-9DAA-9CB7A3F9D955}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-AppPublisherURL=https://github.com/HwangYH98/capstone-design-ai4i-genai-spc
-AppSupportURL=https://github.com/HwangYH98/capstone-design-ai4i-genai-spc/issues
-AppUpdatesURL=https://github.com/HwangYH98/capstone-design-ai4i-genai-spc/releases
+AppPublisherURL=https://github.com/HwangYH98/mainitq-predict-spc
+AppSupportURL=https://github.com/HwangYH98/mainitq-predict-spc/issues
+AppUpdatesURL=https://github.com/HwangYH98/mainitq-predict-spc/releases
 DefaultDirName={localappdata}\Programs\MaintiQ Predict
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes

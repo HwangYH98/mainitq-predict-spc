@@ -202,8 +202,8 @@ STAGE19_SENSOR_PRESETS = {
 }
 
 GENAI_DEFAULT_MODELS = {
-    "gemini": "gemini-2.5-flash",
-    "openai": "gpt-5-mini",
+    "gemini": "gemini-3.5-flash",
+    "openai": "gpt-5.2",
 }
 
 GENAI_ENV_KEYS = [
@@ -213,6 +213,7 @@ GENAI_ENV_KEYS = [
     "GEMINI_MODEL_CANDIDATES",
     "OPENAI_API_KEY",
     "OPENAI_MODEL",
+    "OPENAI_MODEL_CANDIDATES",
     "REQUIRE_GENAI_REPORT",
     "REQUIRE_OPENAI_REPORT",
 ]
@@ -653,12 +654,13 @@ def genai_report_with_sidebar_settings(context: dict, settings: dict) -> tuple[s
         if provider == "gemini":
             os.environ["GEMINI_API_KEY"] = settings["api_key"]
             os.environ["GEMINI_MODEL"] = model
-            os.environ["GEMINI_MODEL_CANDIDATES"] = f"{model},gemini-2.5-flash-lite"
+            os.environ["GEMINI_MODEL_CANDIDATES"] = f"{model},gemini-2.5-flash,gemini-2.5-flash-lite"
             os.environ.pop("OPENAI_API_KEY", None)
             os.environ["REQUIRE_OPENAI_REPORT"] = "0"
         else:
             os.environ["OPENAI_API_KEY"] = settings["api_key"]
             os.environ["OPENAI_MODEL"] = model
+            os.environ["OPENAI_MODEL_CANDIDATES"] = f"{model},gpt-5-mini,gpt-5-nano,gpt-4.1-mini,gpt-4o-mini"
             os.environ.pop("GEMINI_API_KEY", None)
             os.environ["REQUIRE_OPENAI_REPORT"] = "1"
         return genai_ai_report(context, require_genai=True)

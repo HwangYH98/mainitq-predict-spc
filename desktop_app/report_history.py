@@ -98,6 +98,8 @@ def latest_successful_report(history_path: Path = REPORT_HISTORY_PATH) -> dict[s
 
 def classify_report_error(error: Exception | str) -> str:
     message = str(error).lower()
+    if "insufficient_quota" in message or "quota" in message or "billing" in message:
+        return "quota_error"
     if "api key" in message and ("format" in message or "invalid" in message or "unsupported" in message):
         return "key_format_error"
     if "empty" in message or "빈 응답" in message:
