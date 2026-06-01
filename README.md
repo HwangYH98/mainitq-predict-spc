@@ -1,6 +1,33 @@
-# MaintiQ Predict
+# MaintiQ Predict - Smart Manufacturing Predictive Maintenance Dashboard
+
+![Python](https://img.shields.io/badge/Python-3.12-blue)
+![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
+![UI](https://img.shields.io/badge/UI-PySide6%20Desktop-orange)
+![ML](https://img.shields.io/badge/ML-XGBoost%20%7C%20Logistic%20Regression-green)
+![Data](https://img.shields.io/badge/Data-AI4I%202020%20%7C%20SCANIA%20%7C%20MetroPT--3-informational)
 
 MaintiQ Predict는 제조 설비 센서 CSV를 불러와 고장 위험도, 위험 우선순위, AI 관리자 리포트, 작업지시 이력을 확인할 수 있는 Windows 데스크톱 예지보전 MVP입니다.
+
+`MaintiQ`는 **Maintenance**, **Intelligence**, **Quality**를 결합한 이름입니다. 유지보수 데이터를 지능적으로 분석해 설비 고장 위험을 예측하고, 품질 및 운영 안정성을 높이는 시스템이라는 의미를 담고 있습니다.
+
+## 한눈에 보기
+
+| 구분 | 내용 |
+| --- | --- |
+| 목적 | 스마트 제조 설비의 고장 위험 예측과 점검 우선순위 확인 |
+| 입력 | AI4I 형식 또는 회사식 센서 CSV |
+| 모델 | Logistic Regression baseline, XGBoost baseline, SCANIA cost-sensitive model |
+| 앱 | Windows PySide6 데스크톱 앱, Streamlit 관리자 검증 콘솔 |
+| 결과 | 고장 확률, 위험 등급, 우선순위 CSV, 선택형 AI 관리자 리포트 |
+| 데이터 | AI4I 2020 메인 학습 데이터, SCANIA/MetroPT-3/FEMTO 공개 benchmark |
+
+## 주요 화면 흐름
+
+1. 센서 CSV 불러오기
+2. 컬럼 자동 매핑 및 데이터 품질 확인
+3. 고장 위험도 예측 실행
+4. 위험 우선순위 확인
+5. 결과 CSV 저장 및 작업지시 검토
 
 ## 빠른 설치와 실행
 
