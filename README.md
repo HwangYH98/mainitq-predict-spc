@@ -123,10 +123,10 @@ outputs/baseline_predictions.csv
 
 ## 검증 명령
 
-기본 검증:
+기본 학습 파이프라인 검증:
 
 ```powershell
-.\.venv\Scripts\python.exe src\verify_project.py
+.\.venv\Scripts\python.exe src\train_baseline.py
 ```
 
 테스트 실행:
@@ -138,7 +138,7 @@ outputs/baseline_predictions.csv
 문법 검사:
 
 ```powershell
-.\.venv\Scripts\python.exe -m compileall -q src app desktop_app tools streamlit_app.py
+.\.venv\Scripts\python.exe -m compileall -q src app desktop_app streamlit_app.py
 ```
 
 데스크톱 앱 점검:
@@ -153,6 +153,8 @@ outputs/baseline_predictions.csv
 ```powershell
 cmd /c "run_verify.bat < NUL"
 ```
+
+`run_verify.bat`는 로컬에서 여러 검증 산출물을 다시 생성합니다. 생성된 `outputs/` 파일은 GitHub에 올리지 않고 필요할 때 재생성합니다.
 
 ## 설치파일 빌드
 
@@ -177,11 +179,9 @@ app/           Streamlit 관리자 콘솔
 data/          기본 AI4I 2020 CSV
 desktop_app/   Windows 데스크톱 앱
 docs/          사용자 매뉴얼과 배포 문서
-outputs/       실행 결과와 검증 산출물
 samples/       시연용 샘플 CSV
 src/           학습, 예측, SPC, GenAI, 검증 엔진
 tests/         자동 테스트
-tools/         보조 검증 및 배포 도구
 ```
 
 ## 오류 로그

@@ -24,10 +24,7 @@ jobs:
           python -m pip install -r requirements.txt
 
       - name: Compile
-        run: python -m compileall -q src app desktop_app tools streamlit_app.py
+        run: python -m compileall -q src app desktop_app streamlit_app.py
 
       - name: Unit tests
         run: python -m pytest -q
-
-      - name: GitHub upload scope check
-        run: python tools/check_github_upload_scope.py

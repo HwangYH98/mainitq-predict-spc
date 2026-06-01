@@ -25,13 +25,7 @@ __pycache__/
 Thumbs.db
 
 # Local operation/runtime artifacts that are regenerated during demos
-outputs/*
-!outputs/thesis_evidence_pack.md
-!outputs/industrial_engineering_evidence.md
-!outputs/field_validation_protocol.md
-!outputs/field_data_template.csv
-!outputs/field_cost_template.csv
-!outputs/run_to_failure_evidence_summary.md
+outputs/
 outputs/operations.db
 outputs/operations_lite.db
 outputs/realtime_stream/
@@ -40,6 +34,45 @@ outputs/custom_company_model/*.joblib
 outputs/*screenshot*
 local_presentation_notes/
 data_external/
+
+# Local-only Codex/instructor notes and generated research materials
+.tmp_pytest/
+final_docs/
+inputs/
+package.json
+AGENTS.md
+CHANGELOG.md
+docs/CODE_SIGNING_GUIDE.md
+docs/DISTRIBUTION_POLICY.md
+docs/FIELD_VALIDATION_GUIDE.md
+docs/RELEASE_CHECKLIST.md
+run_all.bat
+run_dashboard.bat
+run_gemini_report_once.ps1
+run_openai_dashboard.ps1
+run_openai_report.ps1
+run_stage1_20_gemini.ps1
+run_stage1_20_openai.ps1
+run_stream_watch.bat
+run_summary.bat
+sign_windows_release.bat
+build_windows_launcher.bat
+tools/check_github_upload_scope.py
+tools/check_release_readiness.py
+tools/check_windows_signing_status.py
+tools/create_chatgpt_thesis_packet.py
+tools/create_final_*
+tools/create_ppt_*
+tools/create_release_checksums.py
+tools/list_github_upload_candidates.py
+tools/windows_launcher.py
+tools/*
+!tools/check_lite_distribution.py
+!tools/prepare_desktop_lite_snapshot.py
+!tools/prepare_desktop_runtime_snapshot.py
+!tools/prune_desktop_distribution.py
+!tools/repair_pyinstaller_collect.py
+!tools/validate_desktop_distribution.py
 
 # Local Windows launcher build outputs
 build/
