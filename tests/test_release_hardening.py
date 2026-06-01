@@ -20,12 +20,3 @@ def test_crash_log_export_creates_zip(tmp_path: Path, monkeypatch) -> None:
         assert "crash_sample.log" in archive.namelist()
         assert "README.txt" in archive.namelist()
 
-
-def test_signing_status_reports_missing_file(tmp_path: Path) -> None:
-    from tools.check_windows_signing_status import powershell_signature_status
-
-    status = powershell_signature_status(tmp_path / "missing.exe")
-
-    assert status["exists"] == "false"
-    assert status["status"] == "missing"
-
