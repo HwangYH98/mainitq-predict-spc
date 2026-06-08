@@ -2,8 +2,8 @@
 chcp 65001 >nul
 setlocal
 
-REM Build the lightweight MaintiQ Predict desktop app folder.
-cd /d "%~dp0"
+REM Build the lightweight MaintiQ Predict desktop app folder from the project root.
+cd /d "%~dp0..\..\.."
 set "MAINTIQ_RUNTIME_PROFILE=lite"
 
 if exist ".venv\Scripts\python.exe" (

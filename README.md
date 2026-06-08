@@ -1,132 +1,80 @@
-# MaintiQ Predict - Smart Manufacturing Predictive Maintenance Dashboard
+# MaintiQ Predict
 
-![Python](https://img.shields.io/badge/Python-3.12-blue)
-![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
-![UI](https://img.shields.io/badge/UI-PySide6%20Desktop-orange)
-![ML](https://img.shields.io/badge/ML-XGBoost%20%7C%20Logistic%20Regression-green)
-![Data](https://img.shields.io/badge/Data-AI4I%202020%20%7C%20SCANIA%20%7C%20MetroPT--3-informational)
+MaintiQ Predict는 제조 설비 센서 CSV를 불러와 고장 위험도, 위험 우선순위, AI 리포트, 작업지시 이력을 확인하는 Windows 데스크톱 예지보전 앱입니다.
 
-MaintiQ Predict는 제조 설비 센서 CSV를 불러와 고장 위험도, 위험 우선순위, AI 관리자 리포트, 작업지시 이력을 확인할 수 있는 Windows 데스크톱 예지보전 MVP입니다.
+실제 사용자 배포 기준은 **Full Windows installer**입니다. Streamlit 화면은 로컬 운영 확인과 Admin 검증용으로 유지합니다.
 
-`MaintiQ`는 **Maintenance**, **Intelligence**, **Quality**를 결합한 이름입니다. 유지보수 데이터를 지능적으로 분석해 설비 고장 위험을 예측하고, 품질 및 운영 안정성을 높이는 시스템이라는 의미를 담고 있습니다.
+## Quick Start
 
-## 한눈에 보기
-
-| 구분 | 내용 |
-| --- | --- |
-| 목적 | 스마트 제조 설비의 고장 위험 예측과 점검 우선순위 확인 |
-| 입력 | AI4I 형식 또는 회사식 센서 CSV |
-| 모델 | Logistic Regression baseline, XGBoost baseline, SCANIA cost-sensitive model |
-| 앱 | Windows PySide6 데스크톱 앱, Streamlit 관리자 검증 콘솔 |
-| 결과 | 고장 확률, 위험 등급, 우선순위 CSV, 선택형 AI 관리자 리포트 |
-| 데이터 | AI4I 2020 메인 학습 데이터, SCANIA/MetroPT-3/FEMTO 공개 benchmark |
-
-## 주요 화면 흐름
-
-1. 센서 CSV 불러오기
-2. 컬럼 자동 매핑 및 데이터 품질 확인
-3. 고장 위험도 예측 실행
-4. 위험 우선순위 확인
-5. 결과 CSV 저장 및 작업지시 검토
-
-## 설치 순서
-
-Windows 기준입니다. PowerShell에서 아래 순서대로 실행합니다.
-
-### 1. 코드 다운로드
-
-Git이 설치되어 있으면:
-
-```powershell
-git clone https://github.com/HwangYH98/mainitq-predict-spc.git
-cd mainitq-predict-spc
-```
-
-Git이 없으면 GitHub 화면에서 **Code > Download ZIP**을 눌러 압축을 풀고, PowerShell에서 압축을 푼 폴더로 이동합니다.
-
-```powershell
-cd "압축을_푼_폴더_경로"
-```
-
-### 2. Python 가상환경 만들기
+### 1. 개발 환경 준비
 
 ```powershell
 py -3 -m venv .venv
-```
-
-### 3. 필요한 패키지 설치
-
-```powershell
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-### 4. 데스크톱 앱 실행
+### 2. 로컬 데스크톱 앱 실행
 
 ```powershell
-.\run_desktop_app.bat
+.\01_Run_MaintiQ_Predict.bat
 ```
 
-정상 실행되면 MaintiQ Predict 데스크톱 앱이 열립니다.
-
-설치가 제대로 되었는지 먼저 확인하려면 아래 명령을 실행합니다.
-
-```powershell
-.\.venv\Scripts\python.exe desktop_app\main.py --check
-```
-
-## 데스크톱 앱 실행
-
-정밀 분석 모드:
-
-```powershell
-.\run_desktop_app.bat
-```
-
-또는 직접 실행:
+직접 실행하려면:
 
 ```powershell
 .\.venv\Scripts\python.exe desktop_app\main.py
 ```
 
-빠른 점검 모드:
+### 3. Admin 콘솔 실행
 
 ```powershell
-.\.venv\Scripts\python.exe desktop_app\lite_main.py
+.\02_Run_Admin_Console.bat
 ```
 
-관리자 검증 콘솔:
+Admin 콘솔은 `http://127.0.0.1:8502`에서 열립니다. 비밀번호는 `APP_ADMIN_PASSWORD` 환경변수 또는 실행 중 입력값으로만 사용하며 파일에 저장하지 않습니다.
+
+## Streamlit 실행 기준
+
+Streamlit은 GitHub에 소스가 올라가는 로컬 운영/Admin 검증 화면입니다. 최종 사용자가 설치해서 쓰는 배포물은 Windows installer입니다.
+
+사용자 운영 화면:
 
 ```powershell
-.\run_admin_dashboard.bat
+$env:APP_OPERATOR_PASSWORD="your-operator-password"
+.\.venv\Scripts\python.exe -m streamlit run streamlit_app.py --server.port 8501
 ```
 
-기본 주소:
+Admin 검증 콘솔:
+
+```powershell
+$env:APP_ADMIN_PASSWORD="your-admin-password"
+.\.venv\Scripts\python.exe -m streamlit run app\admin_dashboard.py --server.port 8502
+```
+
+`APP_OPERATOR_PASSWORD`와 `APP_ADMIN_PASSWORD`는 현재 세션 인증에만 사용합니다. `.env`, README, outputs, Git 기록에 저장하지 않습니다.
+
+## 사용자 설치 패키지
+
+공식 사용자 배포 파일:
 
 ```text
-http://127.0.0.1:8502
+release\MaintiQ_Predict_Setup.exe
 ```
 
-## 샘플 CSV 시연
+installer를 다시 만들려면:
 
-시연용 샘플 파일은 `samples/company_sensor_sample.csv`입니다.
+```powershell
+.\03_Build_User_Installer.bat
+```
 
-1. MaintiQ Predict를 실행합니다.
-2. 데이터 예측 화면으로 이동합니다.
-3. `samples/company_sensor_sample.csv`를 불러옵니다.
-4. 자동 컬럼 매핑 결과를 확인합니다.
-5. 예측을 실행하고 고장 위험도, 위험 우선순위, 결과 CSV 저장 기능을 확인합니다.
+이 명령은 내부적으로 portable app 생성, 배포 폴더 검증, Inno Setup installer 생성, checksum 생성을 수행합니다. `release\MaintiQ_Predict_Setup.exe`는 GitHub 코드 저장소에 커밋하지 않고 GitHub Release 첨부 파일로 배포합니다.
 
-사용자용 자세한 절차는 [docs/USER_MANUAL.md](docs/USER_MANUAL.md)에 정리되어 있습니다.
+Lite build는 공식 사용자 배포 기준에서 제외했습니다. 필요할 때만 `scripts\dev\lite\` 아래 개발용 스크립트로 실행합니다.
 
-## 사용 데이터
+## 데이터 입력
 
-### AI4I 2020
-
-- 위치: `data/ai4i2020.csv`
-- 용도: 기본 고장 예측 모델 학습, 평가, 제품 시연
-- target: `Machine failure`
-- 주요 입력 컬럼:
+기본 예측 입력 컬럼:
 
 ```text
 Type
@@ -137,120 +85,97 @@ Torque [Nm]
 Tool wear [min]
 ```
 
-전처리 흐름:
+한국어/현장식 컬럼명도 자동 매핑됩니다. 예: `제품등급`, `공기온도`, `공정온도`, `회전속도`, `모터토크`, `공구마모`.
 
-- `UDI`, `Product ID` 같은 식별자 컬럼 제거
-- `TWF`, `HDF`, `PWF`, `OSF`, `RNF` 같은 정답 누수 가능 컬럼 제거
-- `Type` one-hot encoding
-- stratified train/test split
-- Logistic Regression, XGBoost baseline 학습 및 평가
-
-기본 학습 파이프라인 실행:
-
-```powershell
-.\.venv\Scripts\python.exe src\train_baseline.py
-```
-
-생성 파일:
+기본 샘플:
 
 ```text
-outputs/metrics.json
-outputs/confusion_matrix.png
-outputs/pr_curve.png
-outputs/baseline_predictions.csv
+samples\company_sensor_sample.csv
 ```
 
-### SCANIA Component X
+AI4I 원본 데이터:
 
-- 용도: 추가 공개 산업 benchmark와 비용 기반 검증
-- 로컬 위치: `data_external/scania_component_x/`
-- 원본 데이터는 외부 공개 데이터이므로 별도로 내려받아 `data_external/` 아래에 둡니다.
-- SCANIA 데이터가 준비되어 있으면 아래 명령으로 비용 최적화 검증 산출물을 만들 수 있습니다.
-
-```powershell
-.\.venv\Scripts\python.exe src\scania_official_cost_validation.py --data-dir data_external\scania_component_x
+```text
+data\ai4i2020.csv
 ```
 
-## 핵심 기능
-
-- AI4I형 CSV 자동 감지 및 기본 고장확률 예측
-- SCANIA형 CSV 자동 감지 및 비용 기반 예측
-- CSV 품질 진단과 컬럼 자동 매핑
-- 고장 위험도와 위험 우선순위 확인
-- Gemini 또는 OpenAI API key를 세션에서만 입력해 AI 관리자 리포트 생성
-- 작업지시 초안 생성과 승인/검토/반려 기록
-- Streamlit 관리자 콘솔에서 모델 검증과 공개 benchmark 확인
+`data_external\`의 SCANIA, MetroPT3, FEMTO 같은 공개 benchmark 데이터는 Admin 검증 또는 별도 benchmark script용입니다. 사용자 예측 업로드 화면에 그대로 넣는 데이터 형식이 아닐 수 있습니다.
 
 ## 검증 명령
 
-기본 학습 파이프라인 검증:
+문법/정적 검증:
 
 ```powershell
-.\.venv\Scripts\python.exe src\train_baseline.py
+.\.venv\Scripts\python.exe -m compileall -q src app desktop_app tools streamlit_app.py
 ```
 
-테스트 실행:
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-```
-
-문법 검사:
-
-```powershell
-.\.venv\Scripts\python.exe -m compileall -q src app desktop_app streamlit_app.py
-```
-
-데스크톱 앱 점검:
+데스크톱 앱 핵심 검증:
 
 ```powershell
 .\.venv\Scripts\python.exe desktop_app\main.py --check
 .\.venv\Scripts\python.exe desktop_app\main.py --engine-smoke-test
+.\.venv\Scripts\python.exe desktop_app\main.py --click-workflow-test
 ```
 
-전체 재현 검증:
+테스트:
 
 ```powershell
-cmd /c "run_verify.bat < NUL"
+.\.venv\Scripts\python.exe -m pytest -q --basetemp outputs\pytest_basetemp_local
 ```
 
-`run_verify.bat`는 로컬에서 여러 검증 산출물을 다시 생성합니다. 생성된 `outputs/` 파일은 GitHub에 올리지 않고 필요할 때 재생성합니다.
+일부 Windows 환경에서는 기본 pytest 임시 폴더(`%LOCALAPPDATA%\Temp\pytest-of-*`) 권한 문제로 테스트 준비 단계가 실패할 수 있습니다. 위 명령처럼 `--basetemp`를 지정하면 같은 테스트를 저장소 로컬 임시 경로에서 재현할 수 있습니다.
 
-## 설치파일 빌드
-
-Full 설치본:
+배포 폴더 검증:
 
 ```powershell
-.\build_desktop_app.bat
-.\build_desktop_installer.bat
+.\.venv\Scripts\python.exe tools\validate_desktop_distribution.py dist\MaintiQ_Predict
 ```
 
-Lite 설치본:
+전체 로컬 검증 스크립트는 개발용으로 이동했습니다:
 
 ```powershell
-.\build_desktop_lite_app.bat
-.\build_desktop_lite_installer.bat
+.\scripts\dev\run_verify.bat
 ```
 
-## 주요 폴더 구조
+## GitHub 업로드 기준
+
+GitHub 코드 저장소에 포함:
+
+- `src/`, `desktop_app/`, `app/`, `tests/`
+- `streamlit_app.py`
+- `installer/`
+- 공식 루트 실행 파일 `01_*.bat`, `02_*.bat`, `03_*.bat`
+- 재현 가능한 샘플과 문서
+
+GitHub 코드 저장소에 포함하지 않음:
+
+- `.venv/`
+- `build/`, `dist/`, `release/`
+- `outputs/`
+- `data_external/`
+- API key, `.env`, 비밀번호 파일
+- 실제 회사 원본 데이터
+
+## 연구와 발표 주장 범위
+
+이 저장소는 공개 데이터 기반 예지보전 MVP와 로컬 실행 검증 자료입니다. 발표와 README에서는 다음 범위로만 주장합니다.
+
+- 주장 가능: AI4I 2020 기반 모델 학습과 평가, SCANIA 공개 benchmark의 official cost metric 검증, 로컬 Desktop/Admin 실행, GenAI 관리자 참고 리포트, 작업자 승인형 workflow.
+- 주장 금지: 실제 회사 원화 비용 절감 입증, 실제 PLC/SCADA 생산망 실시간 연동 완료, 실제 회사 데이터 기반 field validation 완료, 자동 정비 명령 실행.
+- 배포 기준: `release\MaintiQ_Predict_Setup.exe`는 GitHub Release 첨부 파일로 배포하고, 코드 저장소에는 커밋하지 않습니다.
+
+## 폴더 구조
 
 ```text
-app/           Streamlit 관리자 콘솔
-data/          기본 AI4I 2020 CSV
-desktop_app/   Windows 데스크톱 앱
-docs/          사용자 매뉴얼과 배포 문서
-samples/       시연용 샘플 CSV
-src/           학습, 예측, SPC, GenAI, 검증 엔진
-tests/         자동 테스트
+app/            Streamlit 사용자/Admin 화면
+data/           AI4I 기본 데이터
+desktop_app/    Windows 데스크톱 앱
+installer/      Inno Setup installer 설정
+samples/        사용자 예측 샘플 CSV
+scripts/dev/    개발, 검증, Lite, 로컬 보조 스크립트
+src/            학습, 예측, SPC, GenAI, 검증 엔진
+tests/          자동 테스트
+tools/          배포 검증과 runtime snapshot 도구
 ```
 
-## 오류 로그
-
-오류가 발생했을 때는 앱의 `오류 로그 내보내기` 버튼을 사용하거나 아래 명령을 실행합니다.
-
-```powershell
-.\.venv\Scripts\python.exe desktop_app\main.py --export-crash-logs
-.\.venv\Scripts\python.exe desktop_app\lite_main.py --export-crash-logs
-```
-
-오류 로그 위치는 `%LOCALAPPDATA%\MaintiQ Predict\logs\`입니다. API key와 비밀번호는 저장하지 않습니다.
+오류 로그는 `%LOCALAPPDATA%\MaintiQ Predict\logs\`에 저장됩니다. API key와 비밀번호는 저장하지 않습니다.

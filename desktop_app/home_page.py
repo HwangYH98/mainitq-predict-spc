@@ -70,6 +70,12 @@ class HomePage(QWidget):
         self.layout.addStretch()
 
     def refresh_status(self) -> None:
+        while self.status_grid.count():
+            item = self.status_grid.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.setParent(None)
+
         threshold = read_json(OUTPUT_DIR / "threshold_summary.json", {}).get("selected_threshold", "N/A")
         spc_summary = read_json(OUTPUT_DIR / "spc_summary.json", {})
         ai_context = read_json(OUTPUT_DIR / "ai_report_context.json", {})
@@ -93,3 +99,6 @@ class HomePage(QWidget):
         ]
         for index, (title, value, note, tone) in enumerate(values):
             self.status_grid.addWidget(make_card(title, value, note, tone=tone), index // 3, index % 3)
+
+    def refresh(self) -> None:
+        self.refresh_status()

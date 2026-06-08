@@ -1,25 +1,15 @@
 @echo off
+chcp 65001 >nul
 setlocal
 
-REM Move to the folder where this .bat file is located.
-REM This makes the script work even if PowerShell starts in C:\WINDOWS\system32.
+REM Official local Admin console runner.
 cd /d "%~dp0"
 
 if exist ".venv\Scripts\python.exe" (
     set "PYTHON=.venv\Scripts\python.exe"
 ) else (
     echo Virtual environment was not found.
-    echo Please run these setup commands from this folder:
-    echo   py -3 -m venv .venv
-    echo   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-    pause
-    exit /b 1
-)
-
-"%PYTHON%" --version >nul 2>nul
-if errorlevel 1 (
-    echo The virtual environment exists, but Python did not run correctly.
-    echo Please recreate it with:
+    echo Please run:
     echo   py -3 -m venv .venv
     echo   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
     pause
@@ -43,15 +33,14 @@ if not defined APP_ADMIN_PASSWORD (
     echo Admin console password was received for this session only.
 )
 
-echo Starting research validation Admin Console on http://127.0.0.1:8502 ...
+echo Starting MaintiQ Admin Console on http://127.0.0.1:8502 ...
 "%PYTHON%" -m streamlit run app\admin_dashboard.py --server.port 8502 --server.headless true --browser.gatherUsageStats false
 if errorlevel 1 goto error
-
 exit /b 0
 
 :error
 echo.
-echo Something failed. Please read the error message above.
+echo Admin console failed. Please read the error message above.
 echo If Streamlit is missing, run:
 echo   "%PYTHON%" -m pip install -r requirements.txt
 pause

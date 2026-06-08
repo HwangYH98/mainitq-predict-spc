@@ -2,9 +2,9 @@
 chcp 65001 >nul
 setlocal
 
-REM Move to the folder where this .bat file is located.
+REM Move to the project root.
 REM This makes the script work even if PowerShell starts in C:\WINDOWS\system32.
-cd /d "%~dp0"
+cd /d "%~dp0..\.."
 
 if exist ".venv\Scripts\python.exe" (
     set "PYTHON=.venv\Scripts\python.exe"
@@ -34,4 +34,3 @@ echo.
 echo Native desktop app failed. Please read the error message above.
 pause
 exit /b 1
-

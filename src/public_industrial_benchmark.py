@@ -367,8 +367,11 @@ def group_split(
     y: pd.Series,
     rul: pd.Series,
     metadata: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series, pd.Series, pd.DataFrame, pd.DataFrame]:
-    """Split by unit when multiple units exist; otherwise split by row order."""
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series, pd.Series, pd.DataFrame, pd.DataFrame, str]:
+    """Split by unit or time, then fall back when supervised training would be single-class."""
+    if y.nunique() < 2:
+        raise ValueError("Public benchmark labels must contain both normal and failure classes.")
+
     units = metadata["unit_id"].drop_duplicates()
     if len(units) >= 4:
         unit_labels = (
@@ -385,12 +388,31 @@ def group_split(
         )
         train_mask = metadata["unit_id"].isin(set(train_units))
         test_mask = metadata["unit_id"].isin(set(test_units))
+        split_strategy = "unit_group_split"
     else:
         order = metadata.sort_values(["unit_id", "time_step"]).index.to_numpy()
         split_at = max(1, int(len(order) * 0.7))
         train_idx = set(order[:split_at].tolist())
         train_mask = metadata.index.to_series().isin(train_idx)
         test_mask = ~train_mask
+        split_strategy = "time_order_split"
+
+    if y.loc[train_mask].nunique() < 2 or y.loc[test_mask].nunique() < 2:
+        label_counts = y.value_counts()
+        if label_counts.min() < 2:
+            raise ValueError(
+                "Public benchmark labels need at least two rows per class for train/test validation."
+            )
+        train_idx, test_idx = train_test_split(
+            y.index,
+            test_size=0.3,
+            random_state=RANDOM_STATE,
+            stratify=y,
+        )
+        train_mask = metadata.index.to_series().isin(set(train_idx))
+        test_mask = metadata.index.to_series().isin(set(test_idx))
+        split_strategy = "row_stratified_fallback"
+
     return (
         X.loc[train_mask],
         X.loc[test_mask],
@@ -400,6 +422,7 @@ def group_split(
         rul.loc[test_mask],
         metadata.loc[train_mask],
         metadata.loc[test_mask],
+        split_strategy,
     )
 
 
@@ -492,7 +515,7 @@ def lead_time_metrics(metadata: pd.DataFrame, y_true: pd.Series, alerts: np.ndar
 def evaluate_alert_strategies(dataset: PublicBenchmarkDataset) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Train alert models and return strategy metrics plus confusion info."""
     X, y, rul, metadata = prepare_features(dataset)
-    X_train, X_test, y_train, y_test, _, _, _, meta_test = group_split(X, y, rul, metadata)
+    X_train, X_test, y_train, y_test, _, _, _, meta_test, split_strategy = group_split(X, y, rul, metadata)
     rule_feature = choose_rule_feature(X_train, y_train)
     rule_threshold = float(X_train[rule_feature].quantile(0.88))
     rule_alerts = (X_test[rule_feature] >= rule_threshold).astype(int).to_numpy()
@@ -548,7 +571,7 @@ def evaluate_alert_strategies(dataset: PublicBenchmarkDataset) -> tuple[pd.DataF
             "label_scope": dataset.label_scope,
             "strategy_id": strategy_id,
             "display_name": display_name,
-            "split_strategy": "unit_group_split_or_time_order",
+            "split_strategy": split_strategy,
             "rule_feature": rule_feature,
             "threshold": round(float(threshold), 6),
         }
@@ -590,7 +613,7 @@ def evaluate_rul(dataset: PublicBenchmarkDataset) -> pd.DataFrame:
     if not dataset.supports_rul:
         return pd.DataFrame()
     X, y, rul, metadata = prepare_features(dataset)
-    X_train, X_test, _, _, y_train, y_test, _, _ = group_split(X, y, rul, metadata)
+    X_train, X_test, _, _, y_train, y_test, _, _, _ = group_split(X, y, rul, metadata)
     models = [
         (
             "linear_regression",
@@ -808,6 +831,7 @@ def write_reports(datasets: list[PublicBenchmarkDataset], metrics_df: pd.DataFra
         "- Public benchmark or sample smoke outputs compare rule-based thresholds, SPC-style alerts, Logistic Regression, XGBoost, tuned thresholds, and ML+SPC combined alerts.",
         "- RUL metrics are reported where run-to-failure or RUL labels are available.",
         "- Simulated operating cost uses false alarm, missed failure, and planned action counts.",
+        "- Single run-to-failure datasets may use a stratified fallback split to keep supervised validation trainable.",
         "",
         "## Do Not Claim",
         "",

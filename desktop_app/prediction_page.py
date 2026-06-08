@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 import pandas as pd
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -31,7 +31,38 @@ MODEL_AI4I = "ai4i"
 MODEL_SCANIA = "scania"
 
 
+def detect_public_benchmark_csv(df: pd.DataFrame) -> str:
+    """Identify raw research benchmark files that are not product upload rows."""
+    columns = [str(column).strip() for column in df.columns]
+    normalized = {column.lower().replace(" ", "_") for column in columns}
+    if "vehicle_id" in normalized:
+        scania_metadata = (
+            {"class_label", "length_of_study_time_step", "in_study_repair"} & normalized
+        )
+        scania_spec_columns = [column for column in normalized if column.startswith("spec_")]
+        if scania_metadata or scania_spec_columns:
+            return "SCANIA Component X benchmark metadata/specification file"
+
+    metropt_hits = {"tp2", "tp3", "oil_temperature", "motor_current", "caudal_impulses"} & normalized
+    if len(metropt_hits) >= 2:
+        return "MetroPT-3 compressor benchmark"
+
+    numeric_header_count = 0
+    for column in columns:
+        try:
+            float(column)
+            numeric_header_count += 1
+        except ValueError:
+            pass
+    if len(columns) == 6 and numeric_header_count >= 4:
+        return "FEMTO/PRONOSTIA bearing benchmark"
+
+    return ""
+
+
 class DataPredictionPage(QWidget):
+    prediction_completed = Signal()
+
     def __init__(self, actor: dict) -> None:
         super().__init__()
         self.actor = actor
@@ -126,12 +157,18 @@ class DataPredictionPage(QWidget):
         controls.setColumnStretch(7, 1)
         layout.addLayout(controls)
 
-        self.message_label = QLabel("샘플 CSV를 바로 사용하거나 회사 센서 CSV를 불러와 시작하세요.")
+        self.message_label = QLabel(
+            "처음이면 '샘플 바로 사용'을 눌러 예측 흐름을 확인하세요. "
+            "회사 센서 CSV 또는 SCANIA readout CSV를 불러온 뒤 예측 결과를 기본 위치에 저장할 수 있습니다."
+        )
         self.message_label.setWordWrap(True)
         self.message_label.setObjectName("statusNotice")
         layout.addWidget(self.message_label)
 
-        self.workflow_status_label = QLabel("CSV를 불러오면 스키마 감지와 예측 버튼이 활성화됩니다.")
+        self.workflow_status_label = QLabel(
+            "지원 입력: 기본 센서 CSV, SCANIA readout CSV. "
+            "SCANIA spec/label/tte, MetroPT3, FEMTO benchmark 원본은 Admin 검증용입니다."
+        )
         self.workflow_status_label.setObjectName("muted")
         self.workflow_status_label.setWordWrap(True)
         layout.addWidget(self.workflow_status_label)
@@ -180,6 +217,8 @@ class DataPredictionPage(QWidget):
 
     def selected_model(self) -> str:
         selected = str(self.model_combo.currentData())
+        if self.detected_schema == MODEL_SCANIA:
+            return MODEL_SCANIA
         if selected == MODEL_AUTO:
             return self.detected_schema
         return selected
@@ -257,6 +296,25 @@ class DataPredictionPage(QWidget):
         try:
             self.input_df = pd.read_csv(path)
             self.current_csv_path = Path(path)
+            public_benchmark = detect_public_benchmark_csv(self.input_df)
+            if public_benchmark:
+                self.input_df = None
+                self.current_csv_path = None
+                self.detected_schema = MODEL_AI4I
+                self.predict_button.setEnabled(False)
+                self.mapping_label.setVisible(False)
+                self.mapping_table.setVisible(False)
+                self.empty_state.setVisible(True)
+                message = (
+                    f"{public_benchmark} 원본 CSV는 제품 예측 업로드 형식이 아닙니다. "
+                    "공개 벤치마크 검증은 Admin 콘솔의 공개 산업 데이터 검증 화면이나 "
+                    "src\\public_industrial_benchmark.py를 사용하세요."
+                )
+                self.message_label.setText(message)
+                self.workflow_status_label.setText("제품 예측에는 기본 센서 CSV 또는 SCANIA readout CSV를 사용하세요.")
+                QMessageBox.warning(self, "제품 업로드에서 지원하지 않는 CSV", message)
+                record_audit(self.actor, "desktop_csv_loaded", "blocked", "csv", Path(path).name, {"reason": public_benchmark})
+                return
             for card in self.step_cards:
                 card.setVisible(True)
             from scania_product_engine import detect_input_schema
@@ -336,7 +394,7 @@ class DataPredictionPage(QWidget):
     def collect_mapping(self) -> tuple[dict[str, str], dict[str, str]]:
         mapping = {column: widget.currentText().strip() for column, widget in self.mapping_widgets.items()}
         units = {column: widget.currentText().strip() for column, widget in self.unit_widgets.items()}
-        missing = [column for column, source in mapping.items() if not source]
+        missing = [column for column, source in mapping.items() if not source and column != "Type"]
         if missing:
             raise ValueError("필수 컬럼이 없습니다. 샘플 CSV를 참고해 컬럼명을 맞춰주세요. 누락: " + ", ".join(missing))
         return mapping, units
@@ -378,6 +436,7 @@ class DataPredictionPage(QWidget):
                 selected,
                 {"rows": len(self.prediction_result["result_df"]), "schema": selected},
             )
+            self.prediction_completed.emit()
         except Exception as error:
             record_audit(self.actor, "desktop_prediction_completed", "error", "prediction", selected, error_message=str(error))
             show_error(self, "예측 실패", error)

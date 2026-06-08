@@ -69,6 +69,8 @@ class MainWindow(QMainWindow):
             "ai_report": AIReportPage(actor),
             "work_order": WorkOrderPage(actor),
         }
+        self.page_order = ["home", "prediction", "monitoring", "ai_report", "work_order"]
+        self.page_instances["prediction"].prediction_completed.connect(self.refresh_related_pages)
         pages = [
             (NAV_LABELS[0], self.page_instances["home"]),
             (NAV_LABELS[1], self.page_instances["prediction"]),
@@ -122,6 +124,26 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(index)
         for button_index, button in enumerate(self.nav_buttons):
             button.setChecked(button_index == index)
+        if 0 <= index < len(self.page_order):
+            self.refresh_page(self.page_order[index])
+
+    def refresh_page(self, page_key: str) -> None:
+        page = self.page_instances.get(page_key)
+        if page_key == "home" and hasattr(page, "refresh"):
+            page.refresh()
+        elif page_key == "monitoring" and hasattr(page, "render"):
+            page.render()
+        elif page_key == "ai_report":
+            if hasattr(page, "load_saved_report"):
+                page.load_saved_report()
+            if hasattr(page, "refresh_history"):
+                page.refresh_history()
+        elif page_key == "work_order" and hasattr(page, "refresh_tables"):
+            page.refresh_tables()
+
+    def refresh_related_pages(self) -> None:
+        for page_key in ["home", "monitoring", "ai_report", "work_order"]:
+            self.refresh_page(page_key)
 
     def check_updates(self) -> None:
         result = check_for_update()
@@ -281,14 +303,24 @@ def run_click_workflow_test() -> int:
     app.processEvents()
     if not prediction_page.predict_button.isEnabled():
         raise RuntimeError("Sample load click did not enable prediction.")
+    if not prediction_page.mapping_table.isVisible() or prediction_page.mapping_table.rowCount() < 6:
+        raise RuntimeError("Sample load click did not show the column-mapping table.")
+    if prediction_page.quick_export_button.isEnabled():
+        raise RuntimeError("Default result-save button should stay disabled before prediction.")
     QTest.mouseClick(prediction_page.predict_button, Qt.MouseButton.LeftButton)
     app.processEvents()
     if not prediction_page.prediction_result:
         raise RuntimeError("Prediction click did not produce a result.")
+    if prediction_page.mapping_table.isVisible():
+        raise RuntimeError("Prediction result should replace the mapping table after a successful run.")
+    if not prediction_page.quick_export_button.isEnabled() or not prediction_page.export_button.isEnabled():
+        raise RuntimeError("Prediction click did not enable result-save buttons.")
     QTest.mouseClick(prediction_page.quick_export_button, Qt.MouseButton.LeftButton)
     app.processEvents()
     if not prediction_page.last_saved_path or not prediction_page.last_saved_path.exists():
         raise RuntimeError("Default result-save click did not create a CSV file.")
+    if prediction_page.last_saved_path.stat().st_size == 0:
+        raise RuntimeError("Default result-save click created an empty CSV file.")
 
     work_order_page: WorkOrderPage = window.page_instances["work_order"]  # type: ignore[assignment]
     window.set_page(4)

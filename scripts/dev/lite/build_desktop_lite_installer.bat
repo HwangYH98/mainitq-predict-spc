@@ -2,8 +2,8 @@
 chcp 65001 >nul
 setlocal
 
-REM Package the MaintiQ Predict Lite app folder with Inno Setup.
-cd /d "%~dp0"
+REM Package the MaintiQ Predict Lite app folder with Inno Setup from the project root.
+cd /d "%~dp0..\..\.."
 
 if exist ".venv\Scripts\python.exe" (
     set "PYTHON=.venv\Scripts\python.exe"
@@ -17,7 +17,7 @@ if exist ".venv\Scripts\python.exe" (
 if errorlevel 1 (
     echo Lite portable app folder is missing or contains forbidden runtime files.
     echo Building it first...
-    call build_desktop_lite_app.bat
+    call "%~dp0build_desktop_lite_app.bat"
     if errorlevel 1 goto error
 ) else (
     echo Existing Lite portable app passed validation:
@@ -86,7 +86,7 @@ if "%MAINTIQ_SIGN_CERT_SHA1%"=="" (
     echo Signing certificate was not configured. Lite installer is unsigned.
     echo To sign release installers later:
     echo   set MAINTIQ_SIGN_CERT_SHA1=your-certificate-thumbprint
-    echo   sign_windows_release.bat
+    echo   scripts\dev\local\sign_windows_release.bat
 )
 exit /b 0
 

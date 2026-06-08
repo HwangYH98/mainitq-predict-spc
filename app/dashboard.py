@@ -1,4 +1,4 @@
-import json
+﻿import json
 import hmac
 import os
 import re
@@ -52,6 +52,7 @@ from realtime_ops import (
     create_work_order_draft,
     predict_field_event,
 )
+from scania_product_engine import looks_like_scania_csv, predict_scania_csv
 from train_baseline import RANDOM_STATE, TEST_SIZE, build_models
 
 REQUIRED_FILES = {
@@ -1014,7 +1015,7 @@ def render_summary_tab(metrics: dict, threshold_summary: dict) -> None:
     st.markdown(
         f"""
         <div class="callout">
-        <strong>발표 핵심 메시지:</strong>
+        <strong>모델 검증 요약:</strong>
         Logistic Regression보다 XGBoost가 PR-AUC 기준으로 우수했고,
         threshold를 {selected_threshold:.2f}로 조정하면 F1-score가 {selected['f1_score']:.4f}까지 개선됩니다.
         SHAP 해석은 torque, rotational speed, tool wear 같은 센서 변수가 고장 예측에 어떻게 기여했는지 보여줍니다.
@@ -1023,16 +1024,14 @@ def render_summary_tab(metrics: dict, threshold_summary: dict) -> None:
         unsafe_allow_html=True,
     )
 
-    st.subheader("5월 11일 시연 흐름")
+    st.subheader("연구 검증 흐름")
     st.markdown(
         """
-        1. Baseline 모델 비교 결과를 보여줍니다.
-        2. Threshold 조정으로 의사결정 기준을 개선한 점을 설명합니다.
-        3. SHAP 그림과 개별 사례로 “왜 고장이라고 예측했는지”를 설명합니다.
-        4. Row 시뮬레이션으로 test row별 고장 확률 변화를 보여줍니다.
-        5. 중간발표 진행안 탭으로 PPT 없이 말할 순서를 확인합니다.
-        6. 현장 CSV MVP와 Stage 9 실제 적용성 탭으로 실사업장 확장 방향을 설명합니다.
-        7. Stage 10 운영 요약 탭에서 최종 통합 MVP와 다운로드 산출물을 보여줍니다.
+        1. Baseline 모델 비교 결과를 확인합니다.
+        2. Threshold 조정으로 의사결정 기준을 검토합니다.
+        3. SHAP 그림과 개별 사례로 고장 예측 근거를 확인합니다.
+        4. Row 단위 검토로 test row별 고장 확률 변화를 확인합니다.
+        5. 공개 산업 데이터 검증과 운영 감사 로그를 함께 점검합니다.
         """
     )
 
@@ -1064,7 +1063,7 @@ def render_threshold_tab(threshold_summary: dict) -> None:
 
     st.info(
         "기본 threshold 0.50은 recall이 높지만 precision이 낮습니다. "
-        f"F1 기준으로 {selected_threshold:.2f}을 선택하면 precision과 F1-score가 좋아져 발표용 의사결정 기준으로 설명하기 쉽습니다."
+        f"F1 기준으로 {selected_threshold:.2f}을 선택하면 precision과 F1-score가 좋아져 운영 의사결정 기준으로 검토하기 쉽습니다."
     )
 
 
@@ -1085,7 +1084,7 @@ def render_shap_tab() -> None:
 def render_row_simulation_tab(predictions: pd.DataFrame, threshold_summary: dict) -> None:
     """Render a simple test-row playback simulation for presentation."""
     st.subheader("Row 시뮬레이션")
-    st.caption("실시간 센서 스트리밍은 아니며, test set 예측 결과를 한 row씩 넘겨보는 발표용 시뮬레이션입니다.")
+    st.caption("실시간 센서 스트리밍은 아니며, 저장된 test set 예측 결과를 한 row씩 검토하는 화면입니다.")
 
     selected_threshold = float(threshold_summary["selected_threshold"])
     selected_position = st.slider(
@@ -1320,7 +1319,36 @@ def render_realtime_prescription_tab(
         )
 
 
-def render_field_csv_tab(threshold_summary: dict) -> None:
+def detect_public_benchmark_upload(df: pd.DataFrame) -> str:
+    """Block raw research benchmark files from the product prediction upload."""
+    columns = [str(column).strip() for column in df.columns]
+    normalized = {column.lower().replace(" ", "_") for column in columns}
+    if "vehicle_id" in normalized:
+        scania_metadata = (
+            {"class_label", "length_of_study_time_step", "in_study_repair"} & normalized
+        )
+        scania_spec_columns = [column for column in normalized if column.startswith("spec_")]
+        if scania_metadata or scania_spec_columns:
+            return "SCANIA Component X benchmark metadata/specification file"
+
+    metropt_hits = {"tp2", "tp3", "oil_temperature", "motor_current", "caudal_impulses"} & normalized
+    if len(metropt_hits) >= 2:
+        return "MetroPT-3 compressor benchmark"
+
+    numeric_header_count = 0
+    for column in columns:
+        try:
+            float(column)
+            numeric_header_count += 1
+        except ValueError:
+            pass
+    if len(columns) == 6 and numeric_header_count >= 4:
+        return "FEMTO/PRONOSTIA bearing benchmark"
+
+    return ""
+
+
+def render_basic_sensor_csv_tab(threshold_summary: dict) -> None:
     """Render CSV upload inference and a manager-facing evidence note."""
     st.subheader("센서 CSV 업로드 예측")
     st.caption(
@@ -1558,6 +1586,11 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         )
 
     st.markdown("#### 2. CSV 업로드")
+    st.caption(
+        "제품 예측 화면은 기본 센서 CSV 또는 SCANIA readout CSV만 처리합니다. "
+        "SCANIA spec/label/tte, MetroPT3, FEMTO 같은 공개 benchmark 원본은 Admin 콘솔에서 검증하세요. "
+        "Streamlit 기본 업로드 한도는 200MB입니다."
+    )
     uploaded_file = st.file_uploader(
         "회사/현장 센서 CSV 업로드",
         type=["csv"],
@@ -1580,91 +1613,141 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         st.error("업로드한 CSV에 row가 없습니다.")
         return
 
+    upload_name = str(getattr(uploaded_file, "name", "company_csv"))
+    if st.session_state.get("smart_csv_upload_name") != upload_name:
+        st.session_state["smart_csv_upload_name"] = upload_name
+        st.session_state.pop("smart_csv_prediction_result", None)
+
     st.markdown("#### 3. 업로드 데이터 미리보기")
     st.dataframe(uploaded_df.head(20), width="stretch")
 
-    suggested_mapping = infer_column_mapping(uploaded_df)
-    st.markdown("#### 3. 컬럼 확인")
-    st.caption("자동 추천값이 틀리면 source column을 직접 바꾸세요. Type이 없으면 기본 M으로 채워 예측하되 품질 경고를 남깁니다.")
-    st.dataframe(suggested_mapping, width="stretch", hide_index=True)
+    public_benchmark = detect_public_benchmark_upload(uploaded_df)
+    if public_benchmark:
+        st.warning(
+            f"{public_benchmark} 원본 CSV는 제품 예측 업로드 형식이 아닙니다. "
+            "공개 데이터셋 평가는 Admin 콘솔의 공개 산업 데이터 검증 화면이나 "
+            "`src\\public_industrial_benchmark.py`에서 실행하세요."
+        )
+        return
 
-    source_options = ["(not mapped)"] + uploaded_df.columns.astype(str).tolist()
-    mapping: dict[str, str] = {}
-    unit_conversions: dict[str, str] = {}
-    mapping_columns = st.columns(2)
-    for index, canonical in enumerate(CANONICAL_SENSOR_COLUMNS):
-        default_source = suggested_mapping.loc[
-            suggested_mapping["canonical_column"] == canonical,
-            "suggested_source_column",
-        ].iloc[0]
-        default_index = source_options.index(default_source) if default_source in source_options else 0
-        with mapping_columns[index % 2]:
-            selected_source = st.selectbox(
-                canonical,
-                options=source_options,
-                index=default_index,
-                key=f"smart_mapping_{canonical}",
-            )
-            mapping[canonical] = "" if selected_source == "(not mapped)" else selected_source
-            if canonical in NUMERIC_SENSOR_COLUMNS:
-                unit_conversions[canonical] = st.selectbox(
-                    f"{canonical} unit",
-                    options=UNIT_OPTIONS,
-                    index=0,
-                    key=f"smart_unit_{canonical}",
+    if looks_like_scania_csv(uploaded_df):
+        st.markdown("#### 3. SCANIA 전용 스키마 확인")
+        st.info(
+            "vehicle_id, time_step, 익명화 센서 컬럼이 감지되었습니다. "
+            "이 파일은 SCANIA 전용 비용 최적화 모델로 예측합니다."
+        )
+        if st.button("SCANIA 예측 실행", type="primary", key="smart_scania_predict_button"):
+            try:
+                with st.spinner("SCANIA 전용 모델로 위험도와 비용 기준 class를 계산하는 중입니다..."):
+                    result = predict_scania_csv(uploaded_df, write_outputs=True)
+                st.session_state["smart_csv_prediction_result"] = result
+                record_audit(
+                    "smart_csv.predict",
+                    "success",
+                    "upload",
+                    upload_name,
+                    {
+                        "row_count": int(len(result["result_df"])),
+                        "schema": "scania",
+                        "high_risk_count": int((result["result_df"]["risk_status"] == "High Risk").sum()),
+                    },
                 )
-
-    policy_id = st.radio(
-        "운영 정책",
-        options=["balanced", "precision_first", "recall_first"],
-        index=0,
-        horizontal=True,
-        format_func=lambda value: {
-            "balanced": "균형 balanced",
-            "precision_first": "오경보 감소 precision_first",
-            "recall_first": "미탐 감소 recall_first",
-        }[value],
-        help="정책에 따라 High Risk threshold와 예상 alert trade-off가 달라집니다.",
-    )
-
-    st.markdown("#### 4. 예측 실행")
-    if st.button("전처리와 예측 실행", type="primary", key="smart_predict_button"):
-        try:
-            with st.spinner("컬럼 매핑, 품질 진단, calibration 확률 예측을 실행하는 중입니다..."):
-                result = predict_company_sensor_csv(
-                    uploaded_df,
-                    mapping=mapping,
-                    unit_conversions=unit_conversions,
-                    policy_id=policy_id,
-                    write_outputs=True,
+                st.success("SCANIA 전용 예측이 완료되었습니다.")
+            except Exception as error:
+                record_audit(
+                    "smart_csv.predict",
+                    "failure",
+                    "upload",
+                    upload_name,
+                    {"schema": "scania"},
+                    error_message=str(error),
                 )
-            st.session_state["smart_csv_prediction_result"] = result
-            record_audit(
-                "smart_csv.predict",
-                "success",
-                "upload",
-                getattr(uploaded_file, "name", "company_csv"),
-                {
-                    "row_count": int(len(result["result_df"])),
-                    "quality_score": result["quality_report"]["quality_score"],
-                    "policy_id": policy_id,
-                    "high_risk_count": int((result["result_df"]["risk_status"] == "High Risk").sum()),
-                },
-            )
-            st.success("전처리와 예측이 완료되었습니다.")
-        except Exception as error:
-            record_audit(
-                "smart_csv.predict",
-                "failure",
-                "upload",
-                getattr(uploaded_file, "name", "company_csv"),
-                {"mapping": mapping, "unit_conversions": unit_conversions, "policy_id": policy_id},
-                error_message=str(error),
-            )
-            st.error("전처리 또는 예측 중 문제가 발생했습니다.")
-            st.warning("컬럼 매핑, 단위 선택, 숫자 형식, Type 값, 결측값을 확인하세요.")
-            st.code(str(error), language="text")
-            return
+                st.error("SCANIA 예측 중 문제가 발생했습니다.")
+                st.code(str(error), language="text")
+                return
+    else:
+        suggested_mapping = infer_column_mapping(uploaded_df)
+        st.markdown("#### 3. 컬럼 확인")
+        st.caption("자동 추천값이 틀리면 source column을 직접 바꾸세요. Type이 없으면 기본 M으로 채워 예측하되 품질 경고를 남깁니다.")
+        st.dataframe(suggested_mapping, width="stretch", hide_index=True)
+
+        source_options = ["(not mapped)"] + uploaded_df.columns.astype(str).tolist()
+        mapping: dict[str, str] = {}
+        unit_conversions: dict[str, str] = {}
+        mapping_columns = st.columns(2)
+        for index, canonical in enumerate(CANONICAL_SENSOR_COLUMNS):
+            default_source = suggested_mapping.loc[
+                suggested_mapping["canonical_column"] == canonical,
+                "suggested_source_column",
+            ].iloc[0]
+            default_index = source_options.index(default_source) if default_source in source_options else 0
+            with mapping_columns[index % 2]:
+                selected_source = st.selectbox(
+                    canonical,
+                    options=source_options,
+                    index=default_index,
+                    key=f"smart_mapping_{canonical}",
+                )
+                mapping[canonical] = "" if selected_source == "(not mapped)" else selected_source
+                if canonical in NUMERIC_SENSOR_COLUMNS:
+                    unit_conversions[canonical] = st.selectbox(
+                        f"{canonical} unit",
+                        options=UNIT_OPTIONS,
+                        index=0,
+                        key=f"smart_unit_{canonical}",
+                    )
+
+        policy_id = st.radio(
+            "운영 정책",
+            options=["balanced", "precision_first", "recall_first"],
+            index=0,
+            horizontal=True,
+            format_func=lambda value: {
+                "balanced": "균형 balanced",
+                "precision_first": "오경보 감소 precision_first",
+                "recall_first": "미탐 감소 recall_first",
+            }[value],
+            help="정책에 따라 High Risk threshold와 예상 alert trade-off가 달라집니다.",
+        )
+
+        st.markdown("#### 4. 예측 실행")
+        if st.button("전처리와 예측 실행", type="primary", key="smart_predict_button"):
+            try:
+                with st.spinner("컬럼 매핑, 품질 진단, calibration 확률 예측을 실행하는 중입니다..."):
+                    result = predict_company_sensor_csv(
+                        uploaded_df,
+                        mapping=mapping,
+                        unit_conversions=unit_conversions,
+                        policy_id=policy_id,
+                        write_outputs=True,
+                    )
+                st.session_state["smart_csv_prediction_result"] = result
+                record_audit(
+                    "smart_csv.predict",
+                    "success",
+                    "upload",
+                    upload_name,
+                    {
+                        "row_count": int(len(result["result_df"])),
+                        "quality_score": result["quality_report"]["quality_score"],
+                        "policy_id": policy_id,
+                        "high_risk_count": int((result["result_df"]["risk_status"] == "High Risk").sum()),
+                    },
+                )
+                st.success("전처리와 예측이 완료되었습니다.")
+            except Exception as error:
+                record_audit(
+                    "smart_csv.predict",
+                    "failure",
+                    "upload",
+                    upload_name,
+                    {"mapping": mapping, "unit_conversions": unit_conversions, "policy_id": policy_id},
+                    error_message=str(error),
+                )
+                st.error("전처리 또는 예측 중 문제가 발생했습니다.")
+                st.warning("컬럼 매핑, 단위 선택, 숫자 형식, Type 값, 결측값을 확인하세요.")
+                st.code(str(error), language="text")
+                return
 
     result = st.session_state.get("smart_csv_prediction_result")
     if result is None:
@@ -1675,8 +1758,22 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     quality_df = result["quality_df"]
     quality_report = result["quality_report"]
     policy = result["policy"]
+    probability_column = next(
+        (
+            column
+            for column in ["calibrated_probability", "failure_window_probability", "xgboost_probability", "probability"]
+            if column in result_df.columns
+        ),
+        "",
+    )
+    if not probability_column:
+        st.error("예측 결과에 확률 컬럼이 없습니다.")
+        return
     high_risk_count = int((result_df["risk_status"] == "High Risk").sum())
-    max_probability = float(result_df["calibrated_probability"].max())
+    max_probability = float(pd.to_numeric(result_df[probability_column], errors="coerce").max())
+    quality_score = float(quality_report.get("quality_score", 0))
+    quality_value = "정상" if quality_report.get("quality_status") == "OK" and quality_score <= 1 else f"{quality_score:.1f}"
+    probability_label = "보정 확률" if probability_column == "calibrated_probability" else "고장 window 확률"
 
     st.markdown("#### 예측 요약")
     col1, col2, col3, col4 = st.columns(4)
@@ -1685,40 +1782,43 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     with col2:
         metric_card("고위험 건수", str(high_risk_count), "선택 정책 기준")
     with col3:
-        metric_card("최고 고장확률", f"{max_probability:.4f}", "보정 확률")
+        metric_card("최고 고장확률", f"{max_probability:.4f}", probability_label)
     with col4:
-        metric_card("품질 점수", f"{quality_report['quality_score']:.1f}", quality_report["quality_status"])
+        metric_card("입력 품질", quality_value, quality_report["quality_status"])
     st.caption(f"운영 정책: {result['policy_id']} / 위험 판정 기준 {float(policy['threshold']):.2f}")
 
     st.markdown("#### 확률 그래프")
-    chart_df = (
-        result_df[["input_row", "raw_probability", "calibrated_probability"]]
-        .rename(
-            columns={
-                "input_row": "입력 row",
-                "raw_probability": "원 확률",
-                "calibrated_probability": "보정 고장확률",
-            }
-        )
-        .set_index("입력 row")
-    )
+    chart_columns = ["input_row", *[column for column in ["raw_probability", probability_column] if column in result_df.columns]]
+    chart_df = result_df[chart_columns].rename(
+        columns={
+            "input_row": "입력 row",
+            "raw_probability": "원 확률",
+            probability_column: probability_label,
+        }
+    ).set_index("입력 row")
     st.line_chart(chart_df, height=320)
-    st.caption("원 확률은 모델의 기본 출력이고, 보정 고장확률은 기준 데이터에서 선택한 확률 보정을 적용한 값입니다.")
+    st.caption("확률 그래프는 선택한 입력 row별 위험 변화를 보여줍니다.")
 
     st.markdown("#### 위험 우선순위")
     priority_columns = [
         "priority_rank",
+        "vehicle_id",
         "input_row",
-        "calibrated_probability",
+        probability_column,
+        "predicted_class",
+        "class_meaning",
         "risk_priority_score",
         "risk_status",
         "recommendation",
     ]
-    priority_display = priority_df[priority_columns].head(30).rename(
+    priority_display = priority_df[[column for column in priority_columns if column in priority_df.columns]].head(30).rename(
         columns={
             "priority_rank": "우선순위",
+            "vehicle_id": "설비 ID",
             "input_row": "입력 row",
-            "calibrated_probability": "보정 고장확률",
+            probability_column: probability_label,
+            "predicted_class": "예측 class",
+            "class_meaning": "class 의미",
             "risk_priority_score": "우선순위 점수",
             "risk_status": "위험 상태",
             "recommendation": "추천 조치",
@@ -1733,33 +1833,46 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     )
 
     with st.expander("데이터 품질 상세 보기"):
-        quality_display = quality_df.rename(
-            columns={
-                "check": "점검 항목",
-                "status": "상태",
-                "detail": "상세",
-                "affected_rows": "영향 row",
-            }
-        )
-        st.dataframe(quality_display, width="stretch", hide_index=True)
+        if quality_df.empty:
+            st.info(quality_report.get("note", "전용 스키마로 처리되었습니다."))
+        else:
+            quality_display = quality_df.rename(
+                columns={
+                    "check": "점검 항목",
+                    "status": "상태",
+                    "detail": "상세",
+                    "affected_rows": "영향 row",
+                }
+            )
+            st.dataframe(quality_display, width="stretch", hide_index=True)
 
     st.markdown("#### 예측 결과표와 다운로드")
     display_columns = [
         "input_row",
+        "vehicle_id",
+        "time_step",
         "Type",
         "raw_probability",
-        "calibrated_probability",
+        probability_column,
+        "predicted_class",
+        "class_meaning",
         "selected_threshold",
         "risk_status",
         "risk_priority_score",
         "data_quality_status",
         "recommendation",
     ]
-    result_display = result_df.sort_values("calibrated_probability", ascending=False)[display_columns].rename(
+    result_display = result_df.sort_values(probability_column, ascending=False)[
+        [column for column in display_columns if column in result_df.columns]
+    ].rename(
         columns={
             "input_row": "입력 row",
+            "vehicle_id": "설비 ID",
+            "time_step": "시점",
             "raw_probability": "원 확률",
-            "calibrated_probability": "보정 고장확률",
+            probability_column: probability_label,
+            "predicted_class": "예측 class",
+            "class_meaning": "class 의미",
             "selected_threshold": "위험 기준",
             "risk_status": "위험 상태",
             "risk_priority_score": "우선순위 점수",
@@ -1775,26 +1888,27 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     st.download_button(
         "예측 결과 CSV 다운로드",
         data=csv_download_bytes(result_df),
-        file_name="company_prediction_results.csv",
+        file_name="scania_product_predictions.csv" if result.get("schema") == "scania" else "company_prediction_results.csv",
         mime="text/csv",
     )
 
-    policy_rows = []
-    for policy_name in ["precision_first", "balanced", "recall_first"]:
-        policy_row = result["policies"][policy_name]
-        policy_rows.append(
-            {
-                "운영 정책": policy_name,
-                "위험 판정 기준": round(float(policy_row["threshold"]), 2),
-                "예상 정밀도": round(float(policy_row["precision"]), 4),
-                "예상 재현율": round(float(policy_row["recall"]), 4),
-                "예상 F1": round(float(policy_row["f1_score"]), 4),
-                "예상 오경보": int(policy_row["false_alarm_count"]),
-                "예상 미탐": int(policy_row["missed_failure_count"]),
-            }
-        )
-    with st.expander("운영 정책별 위험 기준과 예상 trade-off"):
-        st.dataframe(pd.DataFrame(policy_rows), width="stretch", hide_index=True)
+    if result.get("policies"):
+        policy_rows = []
+        for policy_name in ["precision_first", "balanced", "recall_first"]:
+            policy_row = result["policies"][policy_name]
+            policy_rows.append(
+                {
+                    "운영 정책": policy_name,
+                    "위험 판정 기준": round(float(policy_row["threshold"]), 2),
+                    "예상 정밀도": round(float(policy_row["precision"]), 4),
+                    "예상 재현율": round(float(policy_row["recall"]), 4),
+                    "예상 F1": round(float(policy_row["f1_score"]), 4),
+                    "예상 오경보": int(policy_row["false_alarm_count"]),
+                    "예상 미탐": int(policy_row["missed_failure_count"]),
+                }
+            )
+        with st.expander("운영 정책별 위험 기준과 예상 trade-off"):
+            st.dataframe(pd.DataFrame(policy_rows), width="stretch", hide_index=True)
 
 
 def likely_target_index(columns: list[str]) -> int:
@@ -2463,7 +2577,7 @@ def build_selected_report_context(
         )
 
     return {
-        "report_scope": "manager reference report for final capstone presentation",
+        "report_scope": "manager reference report for predictive maintenance operations",
         "generated_at": "created from Streamlit dashboard",
         "simulation_note": ai_context.get(
             "simulation_note",
@@ -4013,187 +4127,8 @@ def render_limitations_tab(stage9_applicability: str, stage19_20_design: str, fi
 
 
 def _legacy_presentation_main() -> None:
-    """Run the older presentation dashboard kept for local reference only."""
-    configure_page()
-    render_header()
-
-    missing_files = [path for path in REQUIRED_FILES.values() if not path.exists()]
-    if missing_files:
-        show_missing_files(missing_files)
-        st.stop()
-
-    metrics = load_json(REQUIRED_FILES["metrics"])
-    threshold_summary = load_json(REQUIRED_FILES["threshold"])
-    local_case = load_markdown(REQUIRED_FILES["local_case"])
-    presentation_summary = load_markdown(REQUIRED_FILES["presentation"])
-    research_plan = load_markdown(REQUIRED_FILES["research_plan"])
-    midterm_guide = load_markdown(REQUIRED_FILES["midterm_guide"])
-    midterm_qna = load_markdown(REQUIRED_FILES["midterm_qna"])
-    rehearsal_checklist = load_markdown(REQUIRED_FILES["rehearsal_checklist"])
-    backup_checklist = load_markdown(REQUIRED_FILES["backup_checklist"])
-    final_roadmap = load_markdown(REQUIRED_FILES["final_roadmap"])
-    stage9_applicability = load_markdown(REQUIRED_FILES["stage9_applicability"])
-    stage10_operations = load_markdown(REQUIRED_FILES["stage10_operations"])
-    stage19_20_design = load_markdown(REQUIRED_FILES["stage19_20_design"])
-    predictions = load_predictions(REQUIRED_FILES["predictions"])
-    spc_timeseries = load_csv(REQUIRED_FILES["spc_timeseries"])
-    spc_summary = load_json(REQUIRED_FILES["spc_summary"])
-    future_predictions = load_csv(REQUIRED_FILES["future_predictions"])
-    future_metrics = load_json(REQUIRED_FILES["future_metrics"])
-    ai_context = load_json(REQUIRED_FILES["ai_report_context"])
-    ai_manager_report = load_markdown(REQUIRED_FILES["ai_manager_report"])
-
-    genai_settings = render_genai_sidebar_settings()
-
-    show_full_dev_tabs = st.sidebar.checkbox(
-        "개발/검증 상세 탭 보기",
-        value=False,
-        help="최종 발표 기본 화면은 핵심 7개 탭만 보여줍니다. 개발/검증용 22개 상세 탭이 필요할 때만 켜세요.",
-    )
-    st.sidebar.caption("기본값은 최종 발표 모드입니다.")
-
-    if not show_full_dev_tabs:
-        tabs = st.tabs(
-            [
-                "최종 Demo",
-                "성과 요약",
-                "CSV 업로드 예측",
-                "Predictive SPC",
-                "GenAI 리포트",
-                "운영 PoC",
-                "한계와 확장",
-            ]
-        )
-
-        with tabs[0]:
-            render_final_demo_tab(
-                metrics,
-                threshold_summary,
-                predictions,
-                spc_summary,
-                ai_context,
-                genai_settings,
-            )
-        with tabs[1]:
-            render_summary_tab(metrics, threshold_summary)
-        with tabs[2]:
-            render_field_csv_tab(threshold_summary)
-        with tabs[3]:
-            render_predictive_spc_tab(spc_summary, spc_timeseries)
-        with tabs[4]:
-            render_ai_report_tab(
-                spc_summary,
-                spc_timeseries,
-                future_predictions,
-                ai_context,
-                ai_manager_report,
-                genai_settings,
-            )
-        with tabs[5]:
-            render_stage15_20_operations_tab(ai_context)
-        with tabs[6]:
-            render_limitations_tab(stage9_applicability, stage19_20_design, final_roadmap)
-        return
-
-    tabs = st.tabs(
-        [
-            "성과 요약",
-            "모델 비교",
-            "Threshold 조정",
-            "SHAP 해석",
-            "Row 시뮬레이션",
-            "실시간 처방 PoC",
-            "Predictive SPC",
-            "AI Report",
-            "현장 CSV MVP",
-            "회사 데이터 재학습 PoC",
-            "개별 사례",
-            "중간발표 진행안",
-            "예상 질문",
-            "발표 요약",
-            "연구계획",
-            "리허설 체크리스트",
-            "당일 백업",
-            "Stage 9 실제 적용성",
-            "Stage 10 운영 요약",
-            "Stage 15~20 로컬 통합",
-            "Stage 19~20 운영 설계",
-            "최종 단계 로드맵",
-            "산업공학 검증 근거",
-            "공개 산업 데이터 검증",
-            "논문 검증 근거",
-            "회사 데이터 실증",
-            "로컬 발표/논문 노트",
-        ]
-    )
-
-    with tabs[0]:
-        render_summary_tab(metrics, threshold_summary)
-    with tabs[1]:
-        render_model_tab(metrics)
-    with tabs[2]:
-        render_threshold_tab(threshold_summary)
-    with tabs[3]:
-        render_shap_tab()
-    with tabs[4]:
-        render_row_simulation_tab(predictions, threshold_summary)
-    with tabs[5]:
-        render_realtime_prescription_tab(
-            spc_timeseries,
-            future_predictions,
-            future_metrics,
-            threshold_summary,
-            spc_summary,
-        )
-    with tabs[6]:
-        render_predictive_spc_tab(spc_summary, spc_timeseries)
-    with tabs[7]:
-        render_ai_report_tab(
-            spc_summary,
-            spc_timeseries,
-            future_predictions,
-            ai_context,
-            ai_manager_report,
-            genai_settings,
-        )
-    with tabs[8]:
-        render_field_csv_tab(threshold_summary)
-    with tabs[9]:
-        render_company_retraining_tab()
-    with tabs[10]:
-        render_markdown_tab("개별 고장 예측 사례", local_case)
-    with tabs[11]:
-        render_markdown_tab("PPT 없는 중간발표 진행안", midterm_guide)
-    with tabs[12]:
-        render_markdown_tab("5월 11일 중간발표 예상 질문 답변", midterm_qna)
-    with tabs[13]:
-        render_markdown_tab("5월 11일 발표 요약", presentation_summary)
-    with tabs[14]:
-        render_markdown_tab("캡스톤 연구 Stage 보완안", research_plan)
-    with tabs[15]:
-        render_markdown_tab("5월 11일 대시보드 리허설 체크리스트", rehearsal_checklist)
-    with tabs[16]:
-        render_markdown_tab("발표 당일 백업 체크리스트", backup_checklist)
-    with tabs[17]:
-        render_markdown_tab("Stage 9 실제 적용성 정리", stage9_applicability)
-    with tabs[18]:
-        render_stage10_operations_tab(metrics, threshold_summary, predictions, stage10_operations)
-    with tabs[19]:
-        render_stage15_20_operations_tab(ai_context)
-    with tabs[20]:
-        render_markdown_tab("Stage 19~20 운영 설계", stage19_20_design)
-    with tabs[21]:
-        render_markdown_tab("최종 단계 로드맵", final_roadmap)
-    with tabs[22]:
-        render_industrial_engineering_evidence_tab()
-    with tabs[23]:
-        render_open_industrial_validation_tab()
-    with tabs[24]:
-        render_thesis_evidence_tab()
-    with tabs[25]:
-        render_field_validation_evidence_tab()
-    with tabs[26]:
-        render_local_notes_tab()
+    """Compatibility entry point for old generated launchers."""
+    main("user")
 
 
 USER_REQUIRED_FILE_KEYS = (
@@ -4210,7 +4145,23 @@ USER_REQUIRED_FILE_KEYS = (
     "shap_bar",
 )
 
-ADMIN_REQUIRED_FILE_KEYS = tuple(REQUIRED_FILES.keys())
+ADMIN_REQUIRED_FILE_KEYS = (
+    "metrics",
+    "threshold",
+    "predictions",
+    "spc_timeseries",
+    "spc_summary",
+    "spc_risk_chart",
+    "spc_control_chart",
+    "future_predictions",
+    "ai_report_context",
+    "ai_manager_report",
+    "confusion_matrix",
+    "pr_curve",
+    "threshold_tuning",
+    "shap_summary",
+    "shap_bar",
+)
 
 
 def ensure_required_files(file_keys: tuple[str, ...]) -> None:
@@ -4308,7 +4259,7 @@ def render_start_tab(
 
 
 def render_product_summary_tab(metrics: dict, threshold_summary: dict) -> None:
-    """Render model quality without presentation-only wording."""
+    """Render model quality without internal-project wording."""
     xgboost = metrics["models"]["xgboost"]
     selected = threshold_summary["selected_metrics"]
     selected_threshold = float(threshold_summary["selected_threshold"])
@@ -4456,6 +4407,17 @@ def render_scope_tab() -> None:
     st.info("세부 비교표와 연구 근거 자료는 사용자 앱이 아니라 Admin 콘솔에서 확인합니다.")
 
 
+OPERATOR_NOTE_REPLACEMENTS = {
+    "Stage": "단계",
+    "PoC": "MVP",
+    "Demo": "시연",
+    "발표": "시연",
+    "논문": "문서",
+    "캡스톤": "프로젝트",
+    "검증": "확인",
+}
+
+
 def render_work_order_tab(ai_context: dict) -> None:
     """Render product-style field event and work-order workflow."""
     st.subheader("작업지시")
@@ -4557,17 +4519,8 @@ def render_work_order_tab(ai_context: dict) -> None:
     if decisions:
         def safe_operator_note(value: str) -> str:
             """Keep product UI free from internal project wording in old notes."""
-            replacements = {
-                "Stage": "단계",
-                "PoC": "MVP",
-                "Demo": "시연",
-                "발표": "시연",
-                "논문": "문서",
-                "캡스톤": "프로젝트",
-                "검증": "확인",
-            }
             text = str(value or "")
-            for source, target in replacements.items():
+            for source, target in OPERATOR_NOTE_REPLACEMENTS.items():
                 text = text.replace(source, target)
             return text
 
@@ -4791,56 +4744,29 @@ def render_admin_app() -> None:
     ensure_required_files(ADMIN_REQUIRED_FILE_KEYS)
     metrics = load_json(REQUIRED_FILES["metrics"])
     threshold_summary = load_json(REQUIRED_FILES["threshold"])
-    local_case = load_markdown(REQUIRED_FILES["local_case"])
-    presentation_summary = load_markdown(REQUIRED_FILES["presentation"])
-    research_plan = load_markdown(REQUIRED_FILES["research_plan"])
-    midterm_guide = load_markdown(REQUIRED_FILES["midterm_guide"])
-    midterm_qna = load_markdown(REQUIRED_FILES["midterm_qna"])
-    rehearsal_checklist = load_markdown(REQUIRED_FILES["rehearsal_checklist"])
-    backup_checklist = load_markdown(REQUIRED_FILES["backup_checklist"])
-    final_roadmap = load_markdown(REQUIRED_FILES["final_roadmap"])
-    stage9_applicability = load_markdown(REQUIRED_FILES["stage9_applicability"])
-    stage10_operations = load_markdown(REQUIRED_FILES["stage10_operations"])
-    stage19_20_design = load_markdown(REQUIRED_FILES["stage19_20_design"])
     predictions = load_predictions(REQUIRED_FILES["predictions"])
     spc_timeseries = load_csv(REQUIRED_FILES["spc_timeseries"])
     spc_summary = load_json(REQUIRED_FILES["spc_summary"])
     future_predictions = load_csv(REQUIRED_FILES["future_predictions"])
-    future_metrics = load_json(REQUIRED_FILES["future_metrics"])
     ai_context = load_json(REQUIRED_FILES["ai_report_context"])
     ai_manager_report = load_markdown(REQUIRED_FILES["ai_manager_report"])
     genai_settings = render_genai_sidebar_settings()
 
-    render_admin_monitoring(ai_context)
-
     tabs = st.tabs(
         [
-            "성과 요약",
+            "성능 요약",
             "모델 비교",
             "Threshold 조정",
             "SHAP 해석",
-            "Row 시뮬레이션",
-            "실시간 처방 PoC",
-            "Predictive SPC",
+            "Row 검토",
+            "위험 모니터링",
             "AI Report",
-            "현장 CSV MVP",
-            "회사 데이터 재학습 PoC",
-            "개별 사례",
-            "중간발표 진행안",
-            "예상 질문",
-            "발표 요약",
-            "연구계획",
-            "리허설 체크리스트",
-            "당일 백업",
-            "Stage 9 실제 적용성",
-            "Stage 10 운영 요약",
-            "Stage 15~20 로컬 통합",
-            "Stage 19~20 운영 설계",
-            "최종 단계 로드맵",
-            "산업공학 검증 근거",
+            "데이터 예측",
+            "회사 데이터 재학습",
+            "운영 감사",
             "공개 산업 데이터 검증",
-            "논문 검증 근거",
-            "로컬 발표/논문 노트",
+            "현장 검증 템플릿",
+            "제품 비교 근거",
         ]
     )
 
@@ -4855,16 +4781,8 @@ def render_admin_app() -> None:
     with tabs[4]:
         render_row_simulation_tab(predictions, threshold_summary)
     with tabs[5]:
-        render_realtime_prescription_tab(
-            spc_timeseries,
-            future_predictions,
-            future_metrics,
-            threshold_summary,
-            spc_summary,
-        )
-    with tabs[6]:
         render_predictive_spc_tab(spc_summary, spc_timeseries)
-    with tabs[7]:
+    with tabs[6]:
         render_ai_report_tab(
             spc_summary,
             spc_timeseries,
@@ -4873,42 +4791,18 @@ def render_admin_app() -> None:
             ai_manager_report,
             genai_settings,
         )
-    with tabs[8]:
+    with tabs[7]:
         render_field_csv_tab(threshold_summary)
-    with tabs[9]:
+    with tabs[8]:
         render_company_retraining_tab()
+    with tabs[9]:
+        render_admin_monitoring(ai_context)
     with tabs[10]:
-        render_markdown_tab("개별 고장 예측 사례", local_case)
-    with tabs[11]:
-        render_markdown_tab("중간발표 진행안", midterm_guide)
-    with tabs[12]:
-        render_markdown_tab("중간발표 예상 질문 답변", midterm_qna)
-    with tabs[13]:
-        render_markdown_tab("발표 요약", presentation_summary)
-    with tabs[14]:
-        render_markdown_tab("캡스톤 연구 Stage 보완안", research_plan)
-    with tabs[15]:
-        render_markdown_tab("리허설 체크리스트", rehearsal_checklist)
-    with tabs[16]:
-        render_markdown_tab("발표 당일 백업 체크리스트", backup_checklist)
-    with tabs[17]:
-        render_markdown_tab("Stage 9 실제 적용성 정리", stage9_applicability)
-    with tabs[18]:
-        render_stage10_operations_tab(metrics, threshold_summary, predictions, stage10_operations)
-    with tabs[19]:
-        render_stage15_20_operations_tab(ai_context)
-    with tabs[20]:
-        render_markdown_tab("Stage 19~20 운영 설계", stage19_20_design)
-    with tabs[21]:
-        render_markdown_tab("최종 단계 로드맵", final_roadmap)
-    with tabs[22]:
-        render_industrial_engineering_evidence_tab()
-    with tabs[23]:
         render_open_industrial_validation_tab()
-    with tabs[24]:
-        render_thesis_evidence_tab()
-    with tabs[25]:
-        render_local_notes_tab()
+    with tabs[11]:
+        render_field_validation_evidence_tab()
+    with tabs[12]:
+        render_industrial_engineering_evidence_tab()
 
 
 def main(app_mode: str = "user") -> None:

@@ -1,8 +1,8 @@
 @echo off
 setlocal
 
-REM Move to the folder where this .bat file is located.
-cd /d "%~dp0"
+REM Move to the project root.
+cd /d "%~dp0..\.."
 
 if exist ".venv\Scripts\python.exe" (
     set "PYTHON=.venv\Scripts\python.exe"

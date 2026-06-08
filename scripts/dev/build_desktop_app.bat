@@ -2,8 +2,8 @@
 chcp 65001 >nul
 setlocal
 
-REM Move to the folder where this .bat file is located.
-cd /d "%~dp0"
+REM Move to the project root from scripts\dev.
+cd /d "%~dp0..\.."
 
 if exist ".venv\Scripts\python.exe" (
     set "PYTHON=.venv\Scripts\python.exe"
