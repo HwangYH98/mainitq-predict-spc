@@ -17,10 +17,11 @@ from sklearn.calibration import calibration_curve
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, confusion_matrix, f1_score, precision_score, recall_score
-from sklearn.model_selection import train_test_split
 
-from data import preprocess_features, prepare_train_test_data
-from train_baseline import RANDOM_STATE, TEST_SIZE, build_models
+from data import load_data, preprocess_data, preprocess_features
+from final_policy import FINAL_POLICY_ID, FINAL_PROBABILITY_BASIS, FINAL_RAW_THRESHOLD, final_policy_dict
+from thesis_methodology_validation import split_60_20_20
+from train_baseline import RANDOM_STATE, build_models
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -564,41 +565,35 @@ def save_calibration_plot(y_true: pd.Series, traces: dict[str, np.ndarray]) -> N
 
 @lru_cache(maxsize=1)
 def train_smart_prediction_bundle() -> dict:
-    """Train XGBoost and calibration helpers for company CSV prediction."""
-    X_train, X_test, y_train, y_test, raw_df = prepare_train_test_data(
-        csv_path=DATA_PATH,
-        test_size=TEST_SIZE,
-        random_state=RANDOM_STATE,
-    )
-    X_fit, X_calib, y_fit, y_calib = train_test_split(
-        X_train,
-        y_train,
-        test_size=0.25,
-        stratify=y_train,
-        random_state=RANDOM_STATE,
-    )
-    model = build_models(y_fit)["xgboost"]
-    model.fit(X_fit, y_fit)
+    """Train XGBoost and calibration helpers with the final 60:20:20 split."""
+    raw_df = load_data(DATA_PATH)
+    X, y = preprocess_data(raw_df)
+    split = split_60_20_20(X, y, RANDOM_STATE)
+    model = build_models(split.y_train)["xgboost"]
+    model.fit(split.X_train, split.y_train)
 
-    raw_calib = model.predict_proba(X_calib)[:, 1]
-    raw_test = model.predict_proba(X_test)[:, 1]
-    sigmoid = fit_sigmoid_calibrator(raw_calib, y_calib)
+    raw_valid = model.predict_proba(split.X_valid)[:, 1]
+    raw_test = model.predict_proba(split.X_test)[:, 1]
+    sigmoid = fit_sigmoid_calibrator(raw_valid, split.y_valid)
     isotonic = IsotonicRegression(out_of_bounds="clip")
-    isotonic.fit(raw_calib, y_calib)
+    isotonic.fit(raw_valid, split.y_valid)
+    sigmoid_valid = apply_calibrator(sigmoid, raw_valid)
+    isotonic_valid = apply_calibrator(isotonic, raw_valid)
     sigmoid_test = apply_calibrator(sigmoid, raw_test)
     isotonic_test = apply_calibrator(isotonic, raw_test)
 
     choices = [
-        CalibrationChoice("raw", brier_score_loss(y_test, raw_test), None),
-        CalibrationChoice("sigmoid", brier_score_loss(y_test, sigmoid_test), sigmoid),
-        CalibrationChoice("isotonic", brier_score_loss(y_test, isotonic_test), isotonic),
+        CalibrationChoice("raw", brier_score_loss(split.y_valid, raw_valid), None),
+        CalibrationChoice("sigmoid", brier_score_loss(split.y_valid, sigmoid_valid), sigmoid),
+        CalibrationChoice("isotonic", brier_score_loss(split.y_valid, isotonic_valid), isotonic),
     ]
     best = sorted(choices, key=lambda choice: choice.brier_score)[0]
-    calibrated_test = raw_test if best.method == "raw" else apply_calibrator(best.calibrator, raw_test)
-    policies = choose_operating_policies(y_test, calibrated_test)
+    valid_calibrated = raw_valid if best.method == "raw" else apply_calibrator(best.calibrator, raw_valid)
+    policies = choose_operating_policies(split.y_valid, valid_calibrated)
+    final_policy = final_policy_dict()
 
     save_calibration_plot(
-        y_test,
+        split.y_test,
         {
             "raw": raw_test,
             "sigmoid": sigmoid_test,
@@ -606,17 +601,25 @@ def train_smart_prediction_bundle() -> dict:
         },
     )
     calibration_payload = {
-        "scope": "AI4I validation calibration for company CSV probability display",
+        "scope": "AI4I validation calibration for probability display; app decision uses raw threshold 0.86",
         "selected_method": best.method,
+        "selection_basis": "validation Brier score",
+        "validation_brier_scores": {choice.method: round(float(choice.brier_score), 6) for choice in choices},
         "brier_scores": {choice.method: round(float(choice.brier_score), 6) for choice in choices},
-        "test_rows": int(len(y_test)),
-        "test_failures": int(y_test.sum()),
+        "test_brier_scores": {
+            "raw": round(float(brier_score_loss(split.y_test, raw_test)), 6),
+            "sigmoid": round(float(brier_score_loss(split.y_test, sigmoid_test)), 6),
+            "isotonic": round(float(brier_score_loss(split.y_test, isotonic_test)), 6),
+        },
+        "test_rows": int(len(split.y_test)),
+        "test_failures": int(split.y_test.sum()),
     }
     CALIBRATION_JSON.write_text(json.dumps(calibration_payload, indent=2, ensure_ascii=False), encoding="utf-8")
     POLICY_JSON.write_text(
         json.dumps(
             {
-                "scope": "policy thresholds are validation-derived; not real factory policy approval",
+                "scope": "app decision uses raw probability threshold 0.86; calibrated thresholds are reference policies only",
+                "final_decision_policy": final_policy,
                 "policies": {
                     key: {
                         field: round(float(value[field]), 4)
@@ -644,9 +647,10 @@ def train_smart_prediction_bundle() -> dict:
 
     return {
         "model": model,
-        "feature_columns": list(X_train.columns),
+        "feature_columns": list(split.X_train.columns),
         "calibration_method": best.method,
         "calibrator": best.calibrator,
+        "final_policy": final_policy,
         "policies": policies,
         "reference_profile": make_reference_profile(raw_df),
         "calibration_metrics": calibration_payload,
@@ -732,12 +736,12 @@ def write_confidence_report(report: dict, calibration_metrics: dict) -> None:
         f"- Quality status: {report['quality_status']}",
         f"- Drift warning count: {report['drift_warning_count']}",
         "",
-        "## Brier Scores",
+        "## Validation Brier Scores",
         "",
         "| Method | Brier score |",
         "|---|---:|",
     ]
-    for method, score in calibration_metrics["brier_scores"].items():
+    for method, score in calibration_metrics["validation_brier_scores"].items():
         rows.append(f"| {method} | {score:.6f} |")
     rows.extend(
         [
@@ -805,10 +809,10 @@ def predict_company_sensor_csv(
         calibrated_probability = apply_calibrator(bundle["calibrator"], raw_probability)
 
     policy_id = policy_id if policy_id in {"precision_first", "balanced", "recall_first"} else "balanced"
-    selected_policy = bundle["policies"][policy_id]
+    selected_policy = bundle["final_policy"]
     threshold = float(selected_policy["threshold"])
     priority_scores = calculate_priority_scores(
-        calibrated_probability,
+        raw_probability,
         threshold,
         float(quality_report["quality_score"]),
     )
@@ -821,18 +825,20 @@ def predict_company_sensor_csv(
     )
     result_df["raw_probability"] = np.round(raw_probability, 6)
     result_df["calibrated_probability"] = np.round(calibrated_probability, 6)
-    result_df["operating_policy"] = policy_id
+    result_df["operating_policy"] = FINAL_POLICY_ID
+    result_df["reference_policy"] = policy_id
+    result_df["probability_basis"] = FINAL_PROBABILITY_BASIS
     result_df["selected_threshold"] = round(threshold, 4)
-    result_df["risk_status"] = np.where(calibrated_probability >= threshold, "High Risk", "Normal")
+    result_df["risk_status"] = np.where(raw_probability >= threshold, "High Risk", "Normal")
     result_df["risk_priority_score"] = np.round(priority_scores, 2)
     result_df["data_quality_status"] = quality_report["quality_status"]
     result_df["recommendation"] = [
         recommendation_for_row(float(prob), threshold, float(score), quality_report["quality_status"])
-        for prob, score in zip(calibrated_probability, priority_scores)
+        for prob, score in zip(raw_probability, priority_scores)
     ]
 
     priority_df = result_df.sort_values(
-        ["risk_priority_score", "calibrated_probability"],
+        ["risk_priority_score", "raw_probability"],
         ascending=[False, False],
     ).reset_index(drop=True)
     priority_df.insert(0, "priority_rank", range(1, len(priority_df) + 1))
@@ -853,7 +859,8 @@ def predict_company_sensor_csv(
         "quality_report": quality_report,
         "result_df": result_df,
         "priority_df": priority_df,
-        "policy_id": policy_id,
+        "policy_id": FINAL_POLICY_ID,
+        "reference_policy_id": policy_id,
         "policy": selected_policy,
         "policies": bundle["policies"],
         "calibration_metrics": bundle["calibration_metrics"],

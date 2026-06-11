@@ -76,7 +76,7 @@ class HomePage(QWidget):
             if widget:
                 widget.setParent(None)
 
-        threshold = read_json(OUTPUT_DIR / "threshold_summary.json", {}).get("selected_threshold", "N/A")
+        threshold = read_json(OUTPUT_DIR / "threshold_summary.json", {}).get("selected_threshold", 0.86)
         spc_summary = read_json(OUTPUT_DIR / "spc_summary.json", {})
         ai_context = read_json(OUTPUT_DIR / "ai_report_context.json", {})
         high_risk = spc_summary.get("high_risk_count", spc_summary.get("risk_summary", {}).get("high_risk_count", "N/A"))

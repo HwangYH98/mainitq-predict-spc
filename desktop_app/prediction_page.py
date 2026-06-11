@@ -460,7 +460,7 @@ class DataPredictionPage(QWidget):
         priority_df = self.prediction_result["priority_df"]
         quality = self.prediction_result.get("quality_report", {})
         threshold = float(self.prediction_result.get("policy", {}).get("threshold", 0.5))
-        probability_column = "calibrated_probability" if "calibrated_probability" in result_df.columns else "failure_window_probability"
+        probability_column = "raw_probability" if "raw_probability" in result_df.columns else "failure_window_probability"
         high_risk = int((result_df["risk_status"] == "High Risk").sum()) if "risk_status" in result_df.columns else 0
         max_probability = float(pd.to_numeric(result_df[probability_column]).max()) if len(result_df) else 0.0
         schema = str(self.prediction_result.get("schema", self.selected_model()))
@@ -517,6 +517,7 @@ class DataPredictionPage(QWidget):
             priority_columns = [
                 "priority_rank",
                 "input_row",
+                "raw_probability",
                 "calibrated_probability",
                 "risk_status",
                 "risk_priority_score",
@@ -531,6 +532,7 @@ class DataPredictionPage(QWidget):
                 "Rotational speed [rpm]",
                 "Torque [Nm]",
                 "Tool wear [min]",
+                "raw_probability",
                 "calibrated_probability",
                 "risk_status",
                 "recommendation",

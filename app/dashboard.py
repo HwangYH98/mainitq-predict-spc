@@ -360,8 +360,7 @@ def show_missing_files(missing_files: list[Path]) -> None:
     for path in missing_files:
         st.code(str(path), language="text")
 
-    st.markdown("먼저 아래 중 하나를 실행하세요.")
-    st.code("run_all.bat", language="powershell")
+    st.markdown("먼저 아래 명령을 순서대로 실행해 기본 산출물을 생성하세요.")
     st.code(
         ".\\.venv\\Scripts\\python.exe src\\train_baseline.py\n"
         ".\\.venv\\Scripts\\python.exe src\\stage4_explain.py\n"
@@ -944,19 +943,32 @@ def model_metrics_dataframe(metrics: dict) -> pd.DataFrame:
 def threshold_dataframe(threshold_summary: dict) -> pd.DataFrame:
     """Convert threshold summary JSON into a comparison table."""
     selected_threshold = threshold_summary["selected_threshold"]
+    legacy = threshold_summary.get("legacy_reference", {})
     return pd.DataFrame(
         [
             {
-                "Threshold": "0.50 (default)",
+                "구분": "기본 기준",
+                "Threshold": "0.50",
                 "Precision": threshold_summary["default_0_5_metrics"]["precision"],
                 "Recall": threshold_summary["default_0_5_metrics"]["recall"],
                 "F1-score": threshold_summary["default_0_5_metrics"]["f1_score"],
+                "해석": "validation 비교 기준",
             },
             {
-                "Threshold": f"{selected_threshold:.2f} (selected by F1)",
+                "구분": "최종 보완",
+                "Threshold": f"{selected_threshold:.2f}",
                 "Precision": threshold_summary["selected_metrics"]["precision"],
                 "Recall": threshold_summary["selected_metrics"]["recall"],
                 "F1-score": threshold_summary["selected_metrics"]["f1_score"],
+                "해석": "검증 세트 선택 -> 고정 테스트 평가",
+            },
+            {
+                "구분": "초기 탐색",
+                "Threshold": f"{float(legacy.get('selected_threshold', 0.87)):.2f}",
+                "Precision": legacy.get("precision", 0.8197),
+                "Recall": legacy.get("recall", 0.7353),
+                "F1-score": legacy.get("f1_score", 0.7752),
+                "해석": "80:20 동일 홀드아웃 탐색 참고",
             },
         ]
     )
@@ -1008,17 +1020,17 @@ def render_summary_tab(metrics: dict, threshold_summary: dict) -> None:
     with col2:
         metric_card("XGBoost PR-AUC", f"{xgboost['pr_auc']:.4f}", "불균형 데이터에서 중요")
     with col3:
-        metric_card("Selected Threshold", f"{threshold_summary['selected_threshold']:.2f}", "F1-score 기준 선택")
+        metric_card("Final Threshold", f"{threshold_summary['selected_threshold']:.2f}", "검증 세트 선택")
     with col4:
-        metric_card("Tuned F1-score", f"{selected['f1_score']:.4f}", "0.50 대비 개선")
+        metric_card("Fixed-Test F1", f"{selected['f1_score']:.4f}", "고정 테스트 평가")
 
     st.markdown(
         f"""
         <div class="callout">
         <strong>모델 검증 요약:</strong>
-        Logistic Regression보다 XGBoost가 PR-AUC 기준으로 우수했고,
-        threshold를 {selected_threshold:.2f}로 조정하면 F1-score가 {selected['f1_score']:.4f}까지 개선됩니다.
-        SHAP 해석은 torque, rotational speed, tool wear 같은 센서 변수가 고장 예측에 어떻게 기여했는지 보여줍니다.
+        XGBoost 원시 확률 기준을 검증 세트에서 {selected_threshold:.2f}로 선택하고,
+        검증 세트와 분리된 고정 테스트 세트에 적용한 F1-score는 {selected['f1_score']:.4f}입니다.
+        SHAP 해석은 torque, rotational speed, tool wear 같은 센서 변수가 고장위험 분류에 어떻게 기여했는지 보여줍니다.
         </div>
         """,
         unsafe_allow_html=True,
@@ -1052,18 +1064,18 @@ def render_threshold_tab(threshold_summary: dict) -> None:
     """Render threshold tuning results."""
     selected_threshold = float(threshold_summary["selected_threshold"])
 
-    st.subheader("Threshold 조정 결과")
+    st.subheader("논문 최종 평가 기준")
     st.dataframe(threshold_dataframe(threshold_summary), width="stretch", hide_index=True)
 
     st.image(
         str(REQUIRED_FILES["threshold_tuning"]),
-        caption="Threshold별 Precision / Recall / F1-score 변화",
+        caption="검증 세트 Threshold별 Precision / Recall / F1-score 변화",
         width="stretch",
     )
 
     st.info(
-        "기본 threshold 0.50은 recall이 높지만 precision이 낮습니다. "
-        f"F1 기준으로 {selected_threshold:.2f}을 선택하면 precision과 F1-score가 좋아져 운영 의사결정 기준으로 검토하기 쉽습니다."
+        f"최종 앱 기본 판정은 원시 확률 {selected_threshold:.2f} 기준입니다. "
+        "0.87은 초기 80:20 탐색 결과로만 보존하며, 보정확률 기준은 참고 정책으로만 사용합니다."
     )
 
 
@@ -1105,7 +1117,7 @@ def render_row_simulation_tab(predictions: pd.DataFrame, threshold_summary: dict
     with col1:
         metric_card("XGBoost Probability", f"{probability:.4f}", "고장 확률")
     with col2:
-        metric_card("Selected Threshold", f"{selected_threshold:.2f}", "F1-score 기준")
+        metric_card("Final Threshold", f"{selected_threshold:.2f}", "검증 세트 선택")
     with col3:
         metric_card("Actual Failure", str(int(current["actual_machine_failure"])), "실제 정답")
     with col4:
@@ -1519,7 +1531,7 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     """Render a company CSV wizard with mapping, quality, calibrated prediction, and priority."""
     st.subheader("데이터 예측")
     st.caption(
-        "회사별 CSV를 업로드하면 컬럼 자동 매핑, 단위 변환, 품질 진단, 보정 확률, 위험 우선순위를 한 흐름으로 확인합니다."
+        "회사별 CSV를 업로드하면 컬럼 자동 매핑, 단위 변환, 품질 진단, 원시 위험 확률, 위험 우선순위를 한 흐름으로 확인합니다."
     )
 
     step_col1, step_col2, step_col3, step_col4 = st.columns(4)
@@ -1698,7 +1710,7 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
                     )
 
         policy_id = st.radio(
-            "운영 정책",
+            "보정확률 참고 정책",
             options=["balanced", "precision_first", "recall_first"],
             index=0,
             horizontal=True,
@@ -1707,13 +1719,13 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
                 "precision_first": "오경보 감소 precision_first",
                 "recall_first": "미탐 감소 recall_first",
             }[value],
-            help="정책에 따라 High Risk threshold와 예상 alert trade-off가 달라집니다.",
+            help="High Risk 기본 판정은 원시 확률 0.86으로 고정됩니다. 이 선택지는 보정확률 trade-off 참고값입니다.",
         )
 
         st.markdown("#### 4. 예측 실행")
         if st.button("전처리와 예측 실행", type="primary", key="smart_predict_button"):
             try:
-                with st.spinner("컬럼 매핑, 품질 진단, calibration 확률 예측을 실행하는 중입니다..."):
+                with st.spinner("컬럼 매핑, 품질 진단, raw 0.86 기준 위험 판정을 실행하는 중입니다..."):
                     result = predict_company_sensor_csv(
                         uploaded_df,
                         mapping=mapping,
@@ -1761,7 +1773,7 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     probability_column = next(
         (
             column
-            for column in ["calibrated_probability", "failure_window_probability", "xgboost_probability", "probability"]
+            for column in ["raw_probability", "failure_window_probability", "xgboost_probability", "probability", "calibrated_probability"]
             if column in result_df.columns
         ),
         "",
@@ -1773,22 +1785,25 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     max_probability = float(pd.to_numeric(result_df[probability_column], errors="coerce").max())
     quality_score = float(quality_report.get("quality_score", 0))
     quality_value = "정상" if quality_report.get("quality_status") == "OK" and quality_score <= 1 else f"{quality_score:.1f}"
-    probability_label = "보정 확률" if probability_column == "calibrated_probability" else "고장 window 확률"
+    probability_label = "원시 위험 확률" if probability_column == "raw_probability" else "보정/참고 확률"
 
     st.markdown("#### 예측 요약")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         metric_card("데이터 row", str(len(result_df)), "업로드 건수")
     with col2:
-        metric_card("고위험 건수", str(high_risk_count), "선택 정책 기준")
+        metric_card("고위험 건수", str(high_risk_count), "raw 0.86 기준")
     with col3:
         metric_card("최고 고장확률", f"{max_probability:.4f}", probability_label)
     with col4:
         metric_card("입력 품질", quality_value, quality_report["quality_status"])
-    st.caption(f"운영 정책: {result['policy_id']} / 위험 판정 기준 {float(policy['threshold']):.2f}")
+    st.caption(
+        f"최종 판정 기준: {result['policy_id']} / {policy.get('probability_basis', 'raw_probability')} "
+        f">= {float(policy['threshold']):.2f}"
+    )
 
     st.markdown("#### 확률 그래프")
-    chart_columns = ["input_row", *[column for column in ["raw_probability", probability_column] if column in result_df.columns]]
+    chart_columns = ["input_row", *dict.fromkeys([column for column in ["raw_probability", probability_column] if column in result_df.columns])]
     chart_df = result_df[chart_columns].rename(
         columns={
             "input_row": "입력 row",
@@ -1847,13 +1862,16 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
             st.dataframe(quality_display, width="stretch", hide_index=True)
 
     st.markdown("#### 예측 결과표와 다운로드")
+    probability_display_columns = ["raw_probability"]
+    if probability_column != "raw_probability" and probability_column in result_df.columns:
+        probability_display_columns.append(probability_column)
+
     display_columns = [
         "input_row",
         "vehicle_id",
         "time_step",
         "Type",
-        "raw_probability",
-        probability_column,
+        *probability_display_columns,
         "predicted_class",
         "class_meaning",
         "selected_threshold",
@@ -2769,7 +2787,7 @@ def render_stage10_operations_tab(
     with col1:
         metric_card("Model Status", "XGBoost", f"PR-AUC {xgboost['pr_auc']:.4f}")
     with col2:
-        metric_card("Threshold", f"{selected_threshold:.2f}", "F1-score 기준")
+        metric_card("Threshold", f"{selected_threshold:.2f}", "검증 세트 선택")
     with col3:
         metric_card("High Risk Rows", str(high_risk_count), f"test {len(predictions)} rows")
     with col4:
@@ -3308,8 +3326,8 @@ def render_industrial_engineering_evidence_tab() -> None:
     st.markdown("#### Risk priority score")
     st.code(
         "risk_priority_score = clip(\n"
-        "    72 * calibrated_probability\n"
-        "  + 14 * I(calibrated_probability >= policy_threshold)\n"
+        "    72 * raw_probability\n"
+        "  + 14 * I(raw_probability >= 0.86)\n"
         "  + 0.14 * (100 - quality_score)\n"
         "  + 10 * clip(missed_failure_weight / max(false_alarm_weight, 0.1), 0, 30) / 30,\n"
         "  0,\n"
@@ -3999,7 +4017,7 @@ def render_final_demo_tab(
     with col1:
         metric_card("Best Model", "XGBoost", f"PR-AUC {xgboost['pr_auc']:.4f}")
     with col2:
-        metric_card("Threshold", f"{selected_threshold:.2f}", "F1-score 기준")
+        metric_card("Threshold", f"{selected_threshold:.2f}", "검증 세트 선택")
     with col3:
         metric_card("High Risk Rows", str(high_risk_count), f"actual failures {actual_failures}")
     with col4:
@@ -4271,7 +4289,7 @@ def render_product_summary_tab(metrics: dict, threshold_summary: dict) -> None:
     with col2:
         metric_card("XGBoost PR-AUC", f"{xgboost['pr_auc']:.4f}", "불균형 데이터 평가")
     with col3:
-        metric_card("Threshold", f"{selected_threshold:.2f}", "F1-score 기준 선택")
+        metric_card("Threshold", f"{selected_threshold:.2f}", "검증 세트 선택")
     with col4:
         metric_card("F1-score", f"{selected['f1_score']:.4f}", "선택 threshold 기준")
 

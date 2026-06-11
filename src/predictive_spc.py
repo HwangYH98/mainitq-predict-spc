@@ -15,12 +15,18 @@ import pandas as pd
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from data import TARGET_COLUMN, load_data, preprocess_data
+from final_policy import FINAL_RAW_THRESHOLD
+from thesis_methodology_validation import split_60_20_20
+from train_baseline import RANDOM_STATE, build_models
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_PATH = PROJECT_ROOT / "data" / "ai4i2020.csv"
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
 PREDICTIONS_PATH = OUTPUT_DIR / "baseline_predictions.csv"
+SPC_INPUT_PREDICTIONS_PATH = OUTPUT_DIR / "spc_input_predictions_60_20_20.csv"
 THRESHOLD_PATH = OUTPUT_DIR / "threshold_summary.json"
 LOCAL_CASE_PATH = OUTPUT_DIR / "local_case_explanation.json"
 
@@ -62,24 +68,61 @@ def require_file(path: Path) -> None:
         )
 
 
-def load_inputs() -> tuple[pd.DataFrame, pd.DataFrame, dict, dict]:
+def build_final_spc_inputs() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Create fixed-test predictions and training-normal SPC reference limits."""
+    raw_data = load_data(DATA_PATH)
+    X, y = preprocess_data(raw_data)
+    split = split_60_20_20(X, y, RANDOM_STATE)
+    model = build_models(split.y_train)["xgboost"]
+    model.fit(split.X_train, split.y_train)
+
+    train_probabilities = model.predict_proba(split.X_train)[:, 1]
+    test_probabilities = model.predict_proba(split.X_test)[:, 1]
+
+    predictions = raw_data.loc[split.X_test.index, ["UDI", "Product ID", TARGET_COLUMN]].copy()
+    predictions = predictions.rename(columns={TARGET_COLUMN: "actual_machine_failure"})
+    predictions["xgboost_probability"] = test_probabilities
+    predictions.sort_index().to_csv(SPC_INPUT_PREDICTIONS_PATH, index=False, encoding="utf-8-sig")
+
+    train_reference = raw_data.loc[
+        split.X_train.index,
+        ["Torque [Nm]", TARGET_COLUMN],
+    ].copy()
+    train_reference["xgboost_probability"] = train_probabilities
+    normal_reference = train_reference[train_reference[TARGET_COLUMN] == 0]
+    risk_center = float(normal_reference["xgboost_probability"].mean())
+    risk_std = float(normal_reference["xgboost_probability"].std(ddof=0))
+    torque_center = float(normal_reference["Torque [Nm]"].mean())
+    torque_std = float(normal_reference["Torque [Nm]"].std(ddof=0))
+    limits = {
+        "basis": "normal training rows from the 60:20:20 split",
+        "risk_center_line": risk_center,
+        "risk_ucl": min(1.0, risk_center + (3 * risk_std)),
+        "risk_lcl": max(0.0, risk_center - (3 * risk_std)),
+        "torque_center_line": torque_center,
+        "torque_ucl": torque_center + (3 * torque_std),
+        "torque_lcl": torque_center - (3 * torque_std),
+    }
+    return predictions, raw_data, limits
+
+
+def load_inputs() -> tuple[pd.DataFrame, pd.DataFrame, dict, dict, dict]:
     """Load the saved prediction result, raw AI4I data, threshold, and SHAP case."""
-    require_file(PREDICTIONS_PATH)
     require_file(DATA_PATH)
     require_file(THRESHOLD_PATH)
     require_file(LOCAL_CASE_PATH)
 
-    predictions = pd.read_csv(PREDICTIONS_PATH)
-    raw_data = pd.read_csv(DATA_PATH)
+    predictions, raw_data, reference_limits = build_final_spc_inputs()
     threshold_summary = load_json(THRESHOLD_PATH)
     local_case = load_json(LOCAL_CASE_PATH)
-    return predictions, raw_data, threshold_summary, local_case
+    return predictions, raw_data, threshold_summary, local_case, reference_limits
 
 
 def build_spc_timeseries(
     predictions: pd.DataFrame,
     raw_data: pd.DataFrame,
     selected_threshold: float,
+    reference_limits: dict,
     rolling_window: int = ROLLING_WINDOW,
 ) -> pd.DataFrame:
     """
@@ -123,11 +166,9 @@ def build_spc_timeseries(
         min_periods=1,
     ).mean()
 
-    risk_center = float(probabilities.mean())
-    risk_std = float(probabilities.std(ddof=0))
-    merged["risk_center_line"] = risk_center
-    merged["risk_ucl"] = min(1.0, risk_center + (3 * risk_std))
-    merged["risk_lcl"] = max(0.0, risk_center - (3 * risk_std))
+    merged["risk_center_line"] = float(reference_limits["risk_center_line"])
+    merged["risk_ucl"] = float(reference_limits["risk_ucl"])
+    merged["risk_lcl"] = float(reference_limits["risk_lcl"])
     merged["risk_beyond_control_limit"] = (
         (probabilities > merged["risk_ucl"]) | (probabilities < merged["risk_lcl"])
     )
@@ -136,15 +177,13 @@ def build_spc_timeseries(
     )
 
     torque = merged["Torque [Nm]"].astype(float)
-    torque_center = float(torque.mean())
-    torque_std = float(torque.std(ddof=0))
     merged["torque_rolling_mean"] = torque.rolling(
         window=rolling_window,
         min_periods=1,
     ).mean()
-    merged["torque_center_line"] = torque_center
-    merged["torque_ucl"] = torque_center + (3 * torque_std)
-    merged["torque_lcl"] = torque_center - (3 * torque_std)
+    merged["torque_center_line"] = float(reference_limits["torque_center_line"])
+    merged["torque_ucl"] = float(reference_limits["torque_ucl"])
+    merged["torque_lcl"] = float(reference_limits["torque_lcl"])
     merged["torque_beyond_control_limit"] = (
         (torque > merged["torque_ucl"]) | (torque < merged["torque_lcl"])
     )
@@ -159,10 +198,10 @@ def summarize_spc(spc_df: pd.DataFrame, selected_threshold: float) -> dict:
     torque_alert_rows = spc_df[spc_df["torque_beyond_control_limit"]]
 
     return {
-        "source": "AI4I 2020 test predictions with UDI-order simulated time axis",
+        "source": "AI4I 2020 fixed-test predictions with UDI-order simulated time axis",
         "note": (
-            "This is an offline time-series simulation, not a live "
-            "factory sensor stream."
+            "Control limits are estimated from normal training rows and fixed on the test view. "
+            "This is an offline UDI-order risk-flow visualization, not a live factory sensor stream."
         ),
         "selected_threshold": float(selected_threshold),
         "rolling_window": int(ROLLING_WINDOW),
@@ -953,10 +992,10 @@ def create_predictive_spc_outputs(
         require_genai = require_openai
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    predictions, raw_data, threshold_summary, local_case = load_inputs()
-    selected_threshold = float(threshold_summary["selected_threshold"])
+    predictions, raw_data, threshold_summary, local_case, reference_limits = load_inputs()
+    selected_threshold = float(threshold_summary.get("selected_threshold", FINAL_RAW_THRESHOLD))
 
-    spc_df = build_spc_timeseries(predictions, raw_data, selected_threshold)
+    spc_df = build_spc_timeseries(predictions, raw_data, selected_threshold, reference_limits)
     spc_summary = summarize_spc(spc_df, selected_threshold)
     spc_summary = add_future_deviation_summary(spc_summary)
 

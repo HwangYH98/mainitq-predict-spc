@@ -223,11 +223,16 @@ def sample_scania_dataframe(row_count: int = 20) -> pd.DataFrame:
         if collected:
             return pd.concat(collected, ignore_index=True).head(row_count)
 
-    artifact = load_scania_artifact()
-    columns = ["vehicle_id", "time_step", *list(artifact["raw_feature_columns"])]
+    if SCANIA_MODEL_ARTIFACT.exists():
+        raw_feature_columns = list(load_scania_artifact()["raw_feature_columns"])
+    else:
+        # Keep CI and UI sample export independent from the optional SCANIA model artifact.
+        raw_feature_columns = [f"{group}_{sensor}" for group in range(3) for sensor in range(4)]
+
+    columns = ["vehicle_id", "time_step", *raw_feature_columns]
     rows = []
     for index in range(max(1, row_count)):
-        row = {column: 0 for column in columns}
+        row = {column: float((index + 1) * (position + 1)) for position, column in enumerate(columns)}
         row["vehicle_id"] = index
         row["time_step"] = float(index + 1)
         rows.append(row)

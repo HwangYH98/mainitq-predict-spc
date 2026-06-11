@@ -21,10 +21,19 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-lock.txt
 
       - name: Compile
         run: python -m compileall -q src app desktop_app streamlit_app.py
+
+      - name: Generate reproducible dashboard outputs
+        run: |
+          python src/train_baseline.py
+          python src/thesis_methodology_validation.py
+          python src/stage4_explain.py
+          python src/predictive_spc.py
+          python src/future_deviation.py
+          python src/create_presentation_summary.py
 
       - name: Unit tests
         run: python -m pytest -q

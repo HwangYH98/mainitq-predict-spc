@@ -11,6 +11,7 @@ def test_official_entrypoints_and_dev_script_layout() -> None:
         "01_Run_MaintiQ_Predict.bat",
         "02_Run_Admin_Console.bat",
         "03_Build_User_Installer.bat",
+        "04_Run_Streamlit_Dashboard.bat",
     ]
     for relative in official_entrypoints:
         assert (ROOT / relative).exists(), f"Missing official root entrypoint: {relative}"
@@ -22,6 +23,7 @@ def test_official_entrypoints_and_dev_script_layout() -> None:
         "build_desktop_installer.bat",
         "build_desktop_lite_app.bat",
         "build_desktop_lite_installer.bat",
+        "run_streamlit_dashboard.bat",
     ]
     for relative in legacy_root_scripts:
         assert not (ROOT / relative).exists(), f"Legacy script should not stay in the root: {relative}"
@@ -29,6 +31,7 @@ def test_official_entrypoints_and_dev_script_layout() -> None:
     moved_scripts = [
         "scripts/dev/run_desktop_app.bat",
         "scripts/dev/run_admin_dashboard.bat",
+        "scripts/dev/run_streamlit_dashboard.bat",
         "scripts/dev/build_desktop_app.bat",
         "scripts/dev/build_desktop_installer.bat",
         "scripts/dev/lite/build_desktop_lite_app.bat",
@@ -39,10 +42,14 @@ def test_official_entrypoints_and_dev_script_layout() -> None:
 
     installer_entrypoint = (ROOT / "03_Build_User_Installer.bat").read_text(encoding="utf-8")
     assert "scripts\\dev\\build_desktop_installer.bat" in installer_entrypoint
+    streamlit_entrypoint = (ROOT / "04_Run_Streamlit_Dashboard.bat").read_text(encoding="utf-8")
+    assert "set /p" not in streamlit_entrypoint
+    assert "Set-Clipboard" in streamlit_entrypoint
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "release\\MaintiQ_Predict_Setup.exe" in readme
     assert "Streamlit은 GitHub에 소스가 올라가는 로컬 운영/Admin 검증 화면" in readme
+    assert ".\\04_Run_Streamlit_Dashboard.bat" in readme
 
 
 def test_crash_log_export_creates_zip(tmp_path: Path, monkeypatch) -> None:

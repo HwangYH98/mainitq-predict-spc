@@ -23,7 +23,7 @@ def test_prediction_draft_decision_round_trip(tmp_path: Path) -> None:
         "created_at": "2026-05-09T00:00:00+09:00",
         "model_name": "xgboost",
         "probability": 0.91,
-        "threshold": 0.87,
+        "threshold": 0.86,
         "risk_status": "High Risk",
         "input": {"equipment_id": "EQ-001"},
         "top_shap_factors": [{"feature": "Tool wear [min]", "value": 0.4}],

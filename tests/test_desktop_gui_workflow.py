@@ -166,6 +166,19 @@ def test_streamlit_scania_and_public_benchmark_upload_paths(tmp_path: Path) -> N
     assert detect_public_benchmark_csv(pd.DataFrame({"vehicle_id": ["V001"], "length_of_study_time_step": [10]}))
 
 
+def test_scania_sample_generation_without_model_artifact(monkeypatch, tmp_path: Path) -> None:
+    sys.path.insert(0, str(ROOT / "src"))
+    import scania_product_engine
+
+    monkeypatch.setattr(scania_product_engine, "DATA_EXTERNAL_DIR", tmp_path / "missing_scania_data")
+    monkeypatch.setattr(scania_product_engine, "SCANIA_MODEL_ARTIFACT", tmp_path / "missing_model.joblib")
+
+    sample = scania_product_engine.sample_scania_dataframe(row_count=5)
+
+    assert len(sample) == 5
+    assert scania_product_engine.detect_input_schema(sample) == "scania"
+
+
 def test_streamlit_work_order_buttons_create_auditable_flow() -> None:
     app = _streamlit_user_app()
 

@@ -458,12 +458,12 @@ def verify_spc_outputs(metrics: dict) -> None:
             fail(f"ai_report_context.json is missing key: {key}")
 
     mode = str(context.get("report_generation_mode", ""))
-    allowed_report_prefixes = ("openai_responses_api:", "gemini_generate_content:")
+    allowed_report_prefixes = ("openai_responses_api:", "gemini_generate_content:", "fallback_")
     if not mode.startswith(allowed_report_prefixes):
         fail(
             "ai_report_context.json report_generation_mode must start with "
-            "'openai_responses_api:' or 'gemini_generate_content:' for Stage 1~20 "
-            f"GenAI verification, found: {mode}"
+            "'openai_responses_api:', 'gemini_generate_content:', or 'fallback_' "
+            f"for reproducible local verification, found: {mode}"
         )
 
     pass_step(

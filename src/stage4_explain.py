@@ -12,7 +12,9 @@ import pandas as pd
 import shap
 from sklearn.metrics import f1_score, precision_score, recall_score
 
-from data import TARGET_COLUMN, prepare_train_test_data
+from data import TARGET_COLUMN, load_data, prepare_train_test_data, preprocess_data
+from final_policy import final_threshold_summary
+from thesis_methodology_validation import choose_threshold_by_validation_f1, split_60_20_20
 from train_baseline import RANDOM_STATE, TEST_SIZE, build_models
 
 
@@ -54,10 +56,10 @@ def save_threshold_plot(threshold_metrics: pd.DataFrame, best_threshold: float, 
     plt.plot(threshold_metrics["threshold"], threshold_metrics["precision"], label="Precision", linewidth=2)
     plt.plot(threshold_metrics["threshold"], threshold_metrics["recall"], label="Recall", linewidth=2)
     plt.plot(threshold_metrics["threshold"], threshold_metrics["f1_score"], label="F1-score", linewidth=2)
-    plt.axvline(best_threshold, color="black", linestyle="--", label=f"Best threshold={best_threshold:.2f}")
-    plt.xlabel("Threshold")
+    plt.axvline(best_threshold, color="black", linestyle="--", label=f"Validation-selected={best_threshold:.2f}")
+    plt.xlabel("Raw probability threshold")
     plt.ylabel("Score")
-    plt.title("XGBoost Threshold Tuning")
+    plt.title("XGBoost Validation-Set Threshold Selection")
     plt.legend()
     plt.grid(alpha=0.3)
     plt.tight_layout()
@@ -213,6 +215,40 @@ def save_local_case(case: dict, best_threshold: float, output_dir: Path) -> None
     markdown_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_legacy_threshold_outputs(data_path: Path, output_dir: Path) -> None:
+    """Preserve the former 80:20 threshold search as an explicit legacy artifact."""
+    X_train, X_test, y_train, y_test, _ = prepare_train_test_data(
+        csv_path=data_path,
+        test_size=TEST_SIZE,
+        random_state=RANDOM_STATE,
+    )
+    xgboost_model = build_models(y_train)["xgboost"]
+    xgboost_model.fit(X_train, y_train)
+    y_proba = xgboost_model.predict_proba(X_test)[:, 1]
+    threshold_metrics = evaluate_thresholds(y_test, y_proba)
+    best_threshold_row = select_best_threshold(threshold_metrics)
+    best_threshold = float(best_threshold_row["threshold"])
+    threshold_metrics.to_csv(output_dir / "legacy_threshold_metrics_80_20.csv", index=False, encoding="utf-8-sig")
+    save_threshold_plot(threshold_metrics, best_threshold, output_dir / "legacy_threshold_tuning_80_20.png")
+    legacy_summary = {
+        "scope": "legacy exploratory 80:20 same-holdout threshold search",
+        "model": "xgboost",
+        "selected_threshold": round(best_threshold, 4),
+        "selected_metrics": {
+            "precision": float(best_threshold_row["precision"]),
+            "recall": float(best_threshold_row["recall"]),
+            "f1_score": float(best_threshold_row["f1_score"]),
+        },
+        "test_rows": int(len(X_test)),
+        "test_failures": int(y_test.sum()),
+        "interpretation": "initial exploratory result only; not the final app decision threshold",
+    }
+    (output_dir / "legacy_threshold_summary_80_20.json").write_text(
+        json.dumps(legacy_summary, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
 def main() -> None:
     """Run Stage 4: threshold tuning and XGBoost SHAP explanation."""
     project_root = Path(__file__).resolve().parents[1]
@@ -220,59 +256,41 @@ def main() -> None:
     output_dir = project_root / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    X_train, X_test, y_train, y_test, raw_df = prepare_train_test_data(
-        csv_path=data_path,
-        test_size=TEST_SIZE,
-        random_state=RANDOM_STATE,
-    )
+    raw_df = load_data(data_path)
+    X, y = preprocess_data(raw_df)
+    split = split_60_20_20(X, y, RANDOM_STATE)
 
-    xgboost_model = build_models(y_train)["xgboost"]
+    xgboost_model = build_models(split.y_train)["xgboost"]
     print("Training XGBoost for Stage 4 explanation...")
-    xgboost_model.fit(X_train, y_train)
+    xgboost_model.fit(split.X_train, split.y_train)
 
-    y_proba = xgboost_model.predict_proba(X_test)[:, 1]
-    threshold_metrics = evaluate_thresholds(y_test, y_proba)
-    best_threshold_row = select_best_threshold(threshold_metrics)
-    best_threshold = float(best_threshold_row["threshold"])
-    y_pred_best = (y_proba >= best_threshold).astype(int)
+    valid_proba = xgboost_model.predict_proba(split.X_valid)[:, 1]
+    test_proba = xgboost_model.predict_proba(split.X_test)[:, 1]
+    best_threshold, threshold_metrics = choose_threshold_by_validation_f1(split.y_valid, valid_proba)
+    y_pred_best = (test_proba >= best_threshold).astype(int)
 
     threshold_metrics.to_csv(output_dir / "threshold_metrics.csv", index=False, encoding="utf-8-sig")
     save_threshold_plot(threshold_metrics, best_threshold, output_dir / "threshold_tuning.png")
 
-    threshold_summary = {
-        "model": "xgboost",
-        "selection_rule": "highest f1_score, then highest recall if tied",
-        "threshold_search": {
-            "start": 0.05,
-            "end": 0.95,
-            "step": 0.01,
-        },
-        "selected_threshold": round(best_threshold, 4),
-        "selected_metrics": {
-            "precision": float(best_threshold_row["precision"]),
-            "recall": float(best_threshold_row["recall"]),
-            "f1_score": float(best_threshold_row["f1_score"]),
-        },
-        "default_0_5_metrics": threshold_metrics.loc[
-            threshold_metrics["threshold"] == 0.50,
-            ["precision", "recall", "f1_score"],
-        ].iloc[0].to_dict(),
-        "test_rows": int(len(X_test)),
-        "test_failures": int(y_test.sum()),
-    }
+    default_metrics = threshold_metrics.loc[
+        threshold_metrics["threshold"] == 0.50,
+        ["precision", "recall", "f1_score"],
+    ].iloc[0].to_dict()
+    threshold_summary = final_threshold_summary(default_metrics)
 
     with (output_dir / "threshold_summary.json").open("w", encoding="utf-8") as file:
         json.dump(threshold_summary, file, indent=2, ensure_ascii=False)
+    write_legacy_threshold_outputs(data_path, output_dir)
 
     print("Calculating SHAP values for XGBoost...")
-    shap_values = calculate_shap_values(xgboost_model, X_train, X_test)
-    save_shap_plots(shap_values, X_test, output_dir)
+    shap_values = calculate_shap_values(xgboost_model, split.X_train, split.X_test)
+    save_shap_plots(shap_values, split.X_test, output_dir)
 
     case = pick_explanation_case(
         raw_df=raw_df,
-        X_test=X_test,
-        y_test=y_test,
-        y_proba=y_proba,
+        X_test=split.X_test,
+        y_test=split.y_test,
+        y_proba=test_proba,
         y_pred=y_pred_best,
         shap_values=shap_values,
     )

@@ -36,11 +36,11 @@ ALIASES = {
     "Tool wear [min]": ["tool wear [min]", "tool_wear", "wear_minutes", "tool_wear_min", "wear"],
 }
 
-THRESHOLD = 0.65
+THRESHOLD = 0.86
 POLICY_THRESHOLDS = {
-    "precision_first": 0.75,
+    "precision_first": THRESHOLD,
     "balanced": THRESHOLD,
-    "recall_first": 0.50,
+    "recall_first": THRESHOLD,
 }
 
 

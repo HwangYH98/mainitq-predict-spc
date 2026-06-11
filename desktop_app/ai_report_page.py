@@ -363,7 +363,7 @@ class AIReportPage(QWidget):
                     {
                         "input_row": row.get("input_row", row.get("priority_rank", "")),
                         "risk_status": row.get("risk_status", ""),
-                        "probability": row.get("calibrated_probability", row.get("failure_window_probability", row.get("raw_probability", ""))),
+                        "probability": row.get("raw_probability", row.get("failure_window_probability", row.get("calibrated_probability", ""))),
                         "risk_priority_score": row.get("risk_priority_score", ""),
                         "recommendation": row.get("recommendation", ""),
                     }

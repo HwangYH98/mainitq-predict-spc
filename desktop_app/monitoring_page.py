@@ -13,11 +13,11 @@ PREDICTION_SOURCES = [
     ("데스크톱 저장 결과", OUTPUT_DIR / "desktop_prediction_results.csv"),
 ]
 PROBABILITY_COLUMNS = [
+    "raw_probability",
     "calibrated_probability",
     "failure_window_probability",
     "xgboost_probability",
     "probability",
-    "raw_probability",
 ]
 
 

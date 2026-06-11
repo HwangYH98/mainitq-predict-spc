@@ -36,6 +36,11 @@ def test_smart_company_csv_prediction_outputs_priority_scores() -> None:
     assert {"raw_probability", "calibrated_probability", "risk_priority_score", "recommendation"}.issubset(
         result_df.columns
     )
+    assert result["policy_id"] == "validation_selected_raw_threshold"
+    assert set(result_df["probability_basis"]) == {"raw_probability"}
+    assert set(result_df["selected_threshold"].round(2)) == {0.86}
+    expected_status = result_df["raw_probability"].map(lambda value: "High Risk" if value >= 0.86 else "Normal")
+    assert result_df["risk_status"].tolist() == expected_status.tolist()
     assert priority_df["risk_priority_score"].is_monotonic_decreasing
 
 
