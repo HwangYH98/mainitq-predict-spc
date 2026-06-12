@@ -63,10 +63,31 @@ def test_repeated_validation_is_deterministic_with_same_seed(monkeypatch) -> Non
     assert first["summary"]["bootstrap"] == second["summary"]["bootstrap"]
 
 
+def test_repeated_validation_evaluates_each_row_once_per_repeat(monkeypatch) -> None:
+    X, y = _synthetic_data()
+
+    monkeypatch.setattr(robust_validation, "load_data", lambda path: pd.DataFrame())
+    monkeypatch.setattr(robust_validation, "preprocess_data", lambda raw_df: (X, y))
+
+    result = robust_validation.run_repeated_validation(
+        repeats=2,
+        folds=3,
+        bootstrap_iterations=10,
+        random_state=19,
+    )
+
+    predictions_df = result["predictions"]
+    assert len(result["folds"]) == 6
+    assert len(predictions_df) == len(y) * 2
+    assert predictions_df.groupby(["repeat", "source_row_index"]).size().eq(1).all()
+    assert predictions_df["source_row_index"].value_counts().eq(2).all()
+
+
 def test_each_outer_fold_trains_new_model_and_selects_threshold_on_inner_validation(monkeypatch) -> None:
     X, y = _synthetic_data()
     fit_calls = []
     threshold_selection_lengths = []
+    calibration_selection_lengths = []
 
     class CountingModel:
         def __init__(self, seed: int) -> None:
@@ -90,10 +111,17 @@ def test_each_outer_fold_trains_new_model_and_selects_threshold_on_inner_validat
         threshold_selection_lengths.append(len(y_valid))
         return original_choose(y_valid, probabilities)
 
+    original_calibration = robust_validation.select_calibration_by_validation_brier
+
+    def recording_calibration(y_valid, probabilities):
+        calibration_selection_lengths.append(len(y_valid))
+        return original_calibration(y_valid, probabilities)
+
     monkeypatch.setattr(robust_validation, "load_data", lambda path: pd.DataFrame())
     monkeypatch.setattr(robust_validation, "preprocess_data", lambda raw_df: (X, y))
     monkeypatch.setattr(robust_validation, "build_models", fake_build_models)
     monkeypatch.setattr(robust_validation, "choose_threshold_by_validation_f1", recording_choose)
+    monkeypatch.setattr(robust_validation, "select_calibration_by_validation_brier", recording_calibration)
 
     result = robust_validation.run_repeated_validation(
         repeats=1,
@@ -105,4 +133,5 @@ def test_each_outer_fold_trains_new_model_and_selects_threshold_on_inner_validat
     assert len(fit_calls) == 3
     assert len({call["seed"] for call in fit_calls}) == 3
     assert set(threshold_selection_lengths) == {20}
+    assert set(calibration_selection_lengths) == {20}
     assert set(result["folds"]["outer_test_rows"]) == {40}

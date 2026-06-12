@@ -13,6 +13,8 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+from sklearn.isotonic import IsotonicRegression
+from sklearn.metrics import brier_score_loss
 from sklearn.model_selection import RepeatedStratifiedKFold, train_test_split
 
 from bootstrap_intervals import stratified_bootstrap_intervals
@@ -23,9 +25,33 @@ from experiment_run import create_experiment_run, record_current_process
 from thesis_methodology_validation import (
     apply_calibrator,
     build_models,
-    calibration_comparison,
     choose_threshold_by_validation_f1,
+    fit_sigmoid,
 )
+
+
+def select_calibration_by_validation_brier(
+    y_valid: pd.Series,
+    valid_raw: np.ndarray,
+) -> tuple[pd.DataFrame, str, dict[str, object | None]]:
+    """Fit and select calibration using only the inner validation split."""
+    calibrators: dict[str, object | None] = {
+        "raw": None,
+        "sigmoid": fit_sigmoid(valid_raw, y_valid),
+        "isotonic": IsotonicRegression(out_of_bounds="clip").fit(valid_raw, y_valid),
+    }
+    rows = []
+    for method, calibrator in calibrators.items():
+        valid_probabilities = apply_calibrator(method, calibrator, valid_raw)
+        rows.append(
+            {
+                "calibration_method": method,
+                "validation_brier": round(float(brier_score_loss(y_valid, valid_probabilities)), 6),
+            }
+        )
+    comparison = pd.DataFrame(rows)
+    selected_method = str(comparison.sort_values(["validation_brier", "calibration_method"]).iloc[0]["calibration_method"])
+    return comparison, selected_method, calibrators
 
 
 def _fit_fold(
@@ -61,12 +87,7 @@ def _fit_fold(
     test_metrics = classification_metrics(y_test, test_raw, predictions=predictions)
     validation_metrics = classification_metrics(y_valid, valid_raw, threshold=selected_threshold)
 
-    calibration_rows, selected_method, calibrators, _ = calibration_comparison(
-        y_valid,
-        valid_raw,
-        y_test,
-        test_raw,
-    )
+    calibration_rows, selected_method, calibrators = select_calibration_by_validation_brier(y_valid, valid_raw)
     selected_calibrator = calibrators[selected_method]
     test_calibrated = apply_calibrator(selected_method, selected_calibrator, test_raw)
     selected_calibration_row = calibration_rows[
@@ -91,7 +112,7 @@ def _fit_fold(
         "validation_pr_auc": validation_metrics["pr_auc"],
         "validation_roc_auc": validation_metrics["roc_auc"],
         "selected_calibration_validation_brier": selected_calibration_row["validation_brier"],
-        "selected_calibration_outer_test_brier": selected_calibration_row["test_brier"],
+        "selected_calibration_outer_test_brier": round(float(brier_score_loss(y_test, test_calibrated)), 6),
         **{f"outer_test_{key}": value for key, value in test_metrics.items()},
     }
     prediction_rows = pd.DataFrame(
