@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import argparse
 import json
 import platform
 import subprocess
@@ -562,13 +563,25 @@ def write_reproducibility_appendix(payload: dict, sensitivity_summary: pd.DataFr
     (OUTPUT_DIR / "thesis_reproducibility_appendix.md").write_text("\n".join(lines), encoding="utf-8")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run thesis methodology validation artifacts.")
+    parser.add_argument(
+        "--update-lock",
+        action="store_true",
+        help="Regenerate requirements-lock.txt with pip freeze. Reproduction runs leave it unchanged by default.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     run_result = run_once(seed=42, save_artifacts=True)
     sensitivity_details, sensitivity_summary = run_seed_sensitivity()
     sensitivity_details.to_csv(OUTPUT_DIR / "thesis_seed_sensitivity.csv", index=False, encoding="utf-8-sig")
     sensitivity_summary.to_csv(OUTPUT_DIR / "thesis_seed_sensitivity_summary.csv", index=False, encoding="utf-8-sig")
-    write_requirements_lock()
+    if args.update_lock:
+        write_requirements_lock()
     write_reproducibility_appendix(run_result["payload"], sensitivity_summary)
     write_summary(
         run_result["payload"],
@@ -580,7 +593,10 @@ def main() -> None:
     print("Thesis methodology validation finished.")
     print(f"Metrics: {OUTPUT_DIR / 'thesis_methodology_metrics.json'}")
     print(f"Summary: {OUTPUT_DIR / 'thesis_methodology_summary.md'}")
-    print(f"Requirements lock: {LOCK_PATH}")
+    if args.update_lock:
+        print(f"Requirements lock: {LOCK_PATH}")
+    else:
+        print("Requirements lock unchanged. Use --update-lock to regenerate it.")
 
 
 if __name__ == "__main__":

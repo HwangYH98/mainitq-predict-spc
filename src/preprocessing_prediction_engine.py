@@ -868,6 +868,7 @@ def predict_company_sensor_csv(
         "score_method": "정밀 예측 엔진",
         "interpretation_note": "정밀 분석 모드의 XGBoost 기반 분석 결과입니다.",
         "calibration_curve_path": str(CALIBRATION_PNG),
+        "output_path": PREDICTIONS_CSV,
         "output_paths": {
             "quality_csv": str(QUALITY_CSV),
             "quality_json": str(QUALITY_JSON),
