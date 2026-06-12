@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import zipfile
 
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -42,14 +43,24 @@ def test_official_entrypoints_and_dev_script_layout() -> None:
 
     installer_entrypoint = (ROOT / "03_Build_User_Installer.bat").read_text(encoding="utf-8")
     assert "scripts\\dev\\build_desktop_installer.bat" in installer_entrypoint
+
     streamlit_entrypoint = (ROOT / "04_Run_Streamlit_Dashboard.bat").read_text(encoding="utf-8")
     assert "set /p" not in streamlit_entrypoint
     assert "Set-Clipboard" in streamlit_entrypoint
+    assert "Login ID: operator_01" in streamlit_entrypoint
+    assert "requirements-lock.txt" in streamlit_entrypoint
+
+    admin_entrypoint = (ROOT / "02_Run_Admin_Console.bat").read_text(encoding="utf-8")
+    assert "Start-Process '%ADMIN_CONSOLE_URL%'" in admin_entrypoint
+    assert "Login ID: admin" in admin_entrypoint
+    assert "requirements-lock.txt" in admin_entrypoint
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "release\\MaintiQ_Predict_Setup.exe" in readme
-    assert "Streamlit은 GitHub에 소스가 올라가는 로컬 운영/Admin 검증 화면" in readme
+    assert "local operator/Admin validation console" in readme
     assert ".\\04_Run_Streamlit_Dashboard.bat" in readme
+    assert ".\\02_Run_Admin_Console.bat" in readme
+    assert "Accepted research run" in readme
 
 
 def test_crash_log_export_creates_zip(tmp_path: Path, monkeypatch) -> None:

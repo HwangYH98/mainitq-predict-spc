@@ -2496,6 +2496,10 @@ def artifact_mime_type(path: Path) -> str:
         return "text/csv"
     if path.suffix == ".json":
         return "application/json"
+    if path.suffix == ".png":
+        return "image/png"
+    if path.suffix == ".zip":
+        return "application/zip"
     return "text/markdown"
 
 
@@ -4727,6 +4731,54 @@ def render_local_notes_tab() -> None:
             st.markdown(path.read_text(encoding="utf-8"))
 
 
+def display_artifact_path(path: Path) -> str:
+    """Return a compact path for UI messages."""
+    try:
+        return str(path.relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def format_research_value(value: object, digits: int = 4) -> str:
+    """Format research metrics without hiding missing values."""
+    if value is None or value == "":
+        return "-"
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def baseline_observed(checks: dict[str, dict], metric: str) -> object:
+    """Read an observed value from the accepted baseline report."""
+    return checks.get(metric, {}).get("observed")
+
+
+def fold_summary_value(summary: dict, metric: str, field: str = "mean") -> object:
+    """Read a fold summary value by metric name."""
+    for row in summary.get("fold_metric_summary", []):
+        if row.get("metric") == metric:
+            return row.get(field)
+    return None
+
+
+def find_local_final_submission_zip() -> Path | None:
+    """Find a local final submission package without generating one."""
+    candidates = [
+        PROJECT_ROOT
+        / "outputs"
+        / "manuscript"
+        / "final"
+        / "MaintiQ_Predict_thesis_v1.0.0_final_submission.zip",
+    ]
+    desktop = Path.home() / "Desktop"
+    candidates.extend(sorted(desktop.glob("*final_submission.zip"), key=lambda path: path.stat().st_mtime, reverse=True))
+    for path in candidates:
+        if path.exists() and path.is_file():
+            return path
+    return None
+
+
 def accepted_research_run_paths() -> tuple[dict, dict[str, Path], list[Path]]:
     """Return accepted research artifact paths selected by the fixed manifest."""
     manifest = load_optional_json(ACCEPTED_RESEARCH_RUN_MANIFEST)
@@ -4742,11 +4794,144 @@ def accepted_research_run_paths() -> tuple[dict, dict[str, Path], list[Path]]:
         "summary": run_dir / "metrics" / "robust_validation_summary.json",
         "fold_metrics": run_dir / "metrics" / "robust_validation_fold_metrics.csv",
         "bootstrap": run_dir / "metrics" / "robust_validation_bootstrap.csv",
+        "oof_predictions": run_dir / "predictions" / "robust_validation_oof_predictions.csv",
         "metric_figure": run_dir / "figures" / "robust_validation_metric_distribution.png",
         "threshold_figure": run_dir / "figures" / "robust_validation_threshold_distribution.png",
+        "report": run_dir / "reports" / "robust_validation_report.md",
     }
     missing = [path for path in paths.values() if not path.exists()]
     return manifest, paths, missing
+
+
+def research_validation_issues(
+    accepted_manifest: dict,
+    paths: dict[str, Path],
+    missing: list[Path],
+    run_manifest: dict | None = None,
+) -> list[dict[str, str]]:
+    """Return read-only validation issues for the accepted run selector."""
+    issues: list[dict[str, str]] = []
+    accepted_run_id = str(accepted_manifest.get("accepted_run_id", "")).strip()
+    if not accepted_manifest:
+        issues.append(
+            {
+                "문제": "accepted manifest 없음",
+                "현재 값": "-",
+                "기대 값": "app/accepted_research_run.json",
+                "확인할 파일": display_artifact_path(ACCEPTED_RESEARCH_RUN_MANIFEST),
+            }
+        )
+    elif not accepted_run_id:
+        issues.append(
+            {
+                "문제": "accepted_run_id 없음",
+                "현재 값": str(accepted_manifest),
+                "기대 값": "검증 채택 run_id",
+                "확인할 파일": display_artifact_path(ACCEPTED_RESEARCH_RUN_MANIFEST),
+            }
+        )
+    elif "\\" in accepted_run_id or "/" in accepted_run_id:
+        issues.append(
+            {
+                "문제": "accepted_run_id 형식 오류",
+                "현재 값": accepted_run_id,
+                "기대 값": "폴더명만 포함한 run_id",
+                "확인할 파일": display_artifact_path(ACCEPTED_RESEARCH_RUN_MANIFEST),
+            }
+        )
+
+    for path in missing:
+        issues.append(
+            {
+                "문제": "필수 산출물 없음",
+                "현재 값": "missing",
+                "기대 값": "accepted run artifact",
+                "확인할 파일": display_artifact_path(path),
+            }
+        )
+
+    if run_manifest:
+        expected_run_id = str(accepted_manifest.get("accepted_run_id", ""))
+        current_run_id = str(run_manifest.get("run_id", ""))
+        git = run_manifest.get("git", {})
+        if current_run_id != expected_run_id:
+            issues.append(
+                {
+                    "문제": "run_id 불일치",
+                    "현재 값": current_run_id,
+                    "기대 값": expected_run_id,
+                    "확인할 파일": display_artifact_path(paths["run_manifest"]),
+                }
+            )
+        if git.get("dirty") is not False:
+            issues.append(
+                {
+                    "문제": "dirty worktree run",
+                    "현재 값": str(git.get("dirty")),
+                    "기대 값": "False",
+                    "확인할 파일": display_artifact_path(paths["run_manifest"]),
+                }
+            )
+        expected_commit = "5eb5af9ac938917bed9f5f7ebc947840d4d1cfec"
+        current_commit = str(git.get("commit", ""))
+        if current_commit != expected_commit:
+            issues.append(
+                {
+                    "문제": "commit 불일치",
+                    "현재 값": current_commit or "-",
+                    "기대 값": expected_commit,
+                    "확인할 파일": display_artifact_path(paths["run_manifest"]),
+                }
+            )
+    return issues
+
+
+def research_download_button(label: str, path: Path, file_name: str | None = None) -> None:
+    """Render one download button for an existing accepted artifact."""
+    if not path.exists():
+        st.caption(f"{label}: 파일 없음")
+        return
+    st.download_button(
+        label,
+        data=path.read_bytes(),
+        file_name=file_name or path.name,
+        mime=artifact_mime_type(path),
+        key=f"research_download_{path.name}_{label}",
+    )
+
+
+def render_research_downloads(paths: dict[str, Path]) -> None:
+    """Render grouped downloads for accepted research evidence."""
+    st.markdown("#### 보고서 패키지 다운로드")
+    downloads = [
+        ("Run manifest JSON", paths["run_manifest"]),
+        ("기준 결과 JSON", paths["baseline_report"]),
+        ("데이터 manifest JSON", paths["data_manifest"]),
+        ("반복검증 요약 JSON", paths["summary"]),
+        ("Fold 성능 CSV", paths["fold_metrics"]),
+        ("Bootstrap CI CSV", paths["bootstrap"]),
+        ("OOF 예측 CSV", paths["oof_predictions"]),
+        ("Metric 분포 PNG", paths["metric_figure"]),
+        ("Threshold 분포 PNG", paths["threshold_figure"]),
+        ("연구 검증 리포트 MD", paths["report"]),
+    ]
+    for row_start in range(0, len(downloads), 3):
+        columns = st.columns(3)
+        for column, (label, path) in zip(columns, downloads[row_start : row_start + 3]):
+            with column:
+                research_download_button(label, path)
+
+    final_zip = find_local_final_submission_zip()
+    if final_zip:
+        st.download_button(
+            "최종 제출 ZIP 다운로드",
+            data=final_zip.read_bytes(),
+            file_name="MaintiQ_Predict_thesis_v1.0.0_final_submission.zip",
+            mime="application/zip",
+            key="research_download_final_submission_zip",
+        )
+    else:
+        st.info("로컬 제출 ZIP 없음: 최종 논문 패키지를 만든 PC에서만 표시됩니다.")
 
 
 def render_research_validation_tab() -> None:
@@ -4757,14 +4942,18 @@ def render_research_validation_tab() -> None:
     accepted_manifest, paths, missing = accepted_research_run_paths()
     if not accepted_manifest.get("accepted_run_id") or missing:
         st.info("검증 결과 없음")
-        if missing:
-            st.write("다음 파일을 찾지 못했습니다.")
-            for path in missing:
-                display_path = path.relative_to(PROJECT_ROOT) if path.is_absolute() else path
-                st.code(str(display_path), language="text")
+        issues = research_validation_issues(accepted_manifest, paths, missing)
+        if issues:
+            st.dataframe(pd.DataFrame(issues), width="stretch", hide_index=True)
         return
 
     run_manifest = load_json(paths["run_manifest"])
+    issues = research_validation_issues(accepted_manifest, paths, missing, run_manifest)
+    if issues:
+        st.error("채택 run 검증 조건을 만족하지 않습니다.")
+        st.dataframe(pd.DataFrame(issues), width="stretch", hide_index=True)
+        return
+
     baseline_report = load_json(paths["baseline_report"])
     data_manifest = load_json(paths["data_manifest"])
     summary = load_json(paths["summary"])
@@ -4776,7 +4965,8 @@ def render_research_validation_tab() -> None:
     data_sha = data_manifest.get("sha256", "")
     status = accepted_manifest.get("accepted_status", "")
 
-    col1, col2, col3, col4 = st.columns(4)
+    st.markdown("#### 채택 run 상태")
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         metric_card("Run ID", run_id, status or "accepted manifest")
     with col2:
@@ -4785,26 +4975,47 @@ def render_research_validation_tab() -> None:
         metric_card("Data SHA-256", str(data_sha)[:12], "AI4I 2020")
     with col4:
         metric_card("Executed", str(run_manifest.get("created_at_utc", "")), "UTC")
+    with col5:
+        metric_card("CI/Policy", "accepted", "0.86 운영 기준 유지")
 
     checks = {
         str(row.get("metric")): row
         for row in baseline_report.get("checks", [])
         if row.get("metric")
     }
-    fixed_rows = [
-        {"Metric": "Threshold", "Value": checks.get("selected_threshold", {}).get("observed")},
-        {"Metric": "Precision", "Value": checks.get("precision", {}).get("observed")},
-        {"Metric": "Recall", "Value": checks.get("recall", {}).get("observed")},
-        {"Metric": "F1-score", "Value": checks.get("f1_score", {}).get("observed")},
-        {"Metric": "PR-AUC", "Value": checks.get("pr_auc", {}).get("observed")},
-        {"Metric": "ROC-AUC", "Value": checks.get("roc_auc", {}).get("observed")},
-        {"Metric": "Isotonic Brier", "Value": checks.get("test_brier", {}).get("observed")},
+    aggregate = summary.get("aggregate_oof_metrics", {})
+    comparison_rows = [
+        {
+            "구분": "운영 정책",
+            "자료": "대표 60:20:20 고정 테스트",
+            "Threshold": format_research_value(baseline_observed(checks, "selected_threshold"), 2),
+            "Precision": format_research_value(baseline_observed(checks, "precision")),
+            "Recall": format_research_value(baseline_observed(checks, "recall")),
+            "F1": format_research_value(baseline_observed(checks, "f1_score")),
+            "PR-AUC": format_research_value(baseline_observed(checks, "pr_auc")),
+            "ROC-AUC": format_research_value(baseline_observed(checks, "roc_auc")),
+            "Brier": format_research_value(baseline_observed(checks, "test_brier"), 6),
+            "해석": "Desktop/Streamlit 운영 기준 유지",
+        },
+        {
+            "구분": "연구 검증",
+            "자료": "5x5 외부 fold OOF 전체",
+            "Threshold": "fold별 내부 선택",
+            "Precision": format_research_value(aggregate.get("precision")),
+            "Recall": format_research_value(aggregate.get("recall")),
+            "F1": format_research_value(aggregate.get("f1_score")),
+            "PR-AUC": format_research_value(aggregate.get("pr_auc")),
+            "ROC-AUC": format_research_value(aggregate.get("roc_auc")),
+            "Brier": format_research_value(aggregate.get("brier_score"), 6),
+            "해석": "일반화 민감도 보조 근거",
+        },
     ]
     st.markdown("#### 대표 고정 테스트 결과")
-    st.dataframe(pd.DataFrame(fixed_rows), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(comparison_rows), width="stretch", hide_index=True)
 
     st.markdown("#### 반복 교차검증 평균·표준편차")
-    st.dataframe(pd.DataFrame(summary.get("fold_metric_summary", [])), width="stretch", hide_index=True)
+    fold_summary = pd.DataFrame(summary.get("fold_metric_summary", []))
+    st.dataframe(fold_summary, width="stretch", hide_index=True)
 
     st.markdown("#### 95% 신뢰구간")
     display_bootstrap = bootstrap[
@@ -4813,6 +5024,14 @@ def render_research_validation_tab() -> None:
     st.dataframe(display_bootstrap, width="stretch", hide_index=True)
 
     st.markdown("#### Fold별 성능")
+    threshold_mean = fold_summary_value(summary, "selected_threshold", "mean")
+    threshold_min = fold_summary_value(summary, "selected_threshold", "min")
+    threshold_max = fold_summary_value(summary, "selected_threshold", "max")
+    st.caption(
+        "각 fold의 임계값은 외부 테스트 fold가 아니라 내부 검증 자료에서만 선택했습니다. "
+        f"선택 threshold 평균 {format_research_value(threshold_mean)}, "
+        f"범위 {format_research_value(threshold_min, 2)}-{format_research_value(threshold_max, 2)}."
+    )
     fold_columns = [
         "repeat",
         "fold",
@@ -4826,11 +5045,41 @@ def render_research_validation_tab() -> None:
     ]
     st.dataframe(fold_metrics[[column for column in fold_columns if column in fold_metrics.columns]], width="stretch", hide_index=True)
 
+    st.markdown("#### 그림")
     col_fig1, col_fig2 = st.columns(2)
     with col_fig1:
         st.image(str(paths["metric_figure"]), caption="Fold별 성능 분포", width="stretch")
     with col_fig2:
         st.image(str(paths["threshold_figure"]), caption="내부 검증 선택 임계값 분포", width="stretch")
+
+    st.markdown("#### 해석 한계")
+    col_allow, col_block = st.columns(2)
+    with col_allow:
+        st.markdown("**논문에 넣어도 되는 주장**")
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"주장": "고정 테스트 F1 0.7692와 반복 OOF F1 0.7056을 함께 해석한다."},
+                    {"주장": "반복 외부검증은 분할 민감도와 불확실성 보조 근거이다."},
+                    {"주장": "운영 정책 threshold 0.86은 변경하지 않았다."},
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+    with col_block:
+        st.markdown("**넣으면 안 되는 주장**")
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"주장": "실제 공장 성능 또는 비용 절감을 입증했다."},
+                    {"주장": "시간 기반 고장 리드타임을 검증했다."},
+                    {"주장": "반복검증 threshold가 운영 0.86을 대체한다."},
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
 
     st.markdown(
         """
@@ -4841,6 +5090,8 @@ def render_research_validation_tab() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    render_research_downloads(paths)
 
 
 def render_user_app() -> None:
@@ -4897,38 +5148,43 @@ def render_admin_app() -> None:
     ai_manager_report = load_markdown(REQUIRED_FILES["ai_manager_report"])
     genai_settings = render_genai_sidebar_settings()
 
-    tabs = st.tabs(
-        [
-            "성능 요약",
-            "모델 비교",
-            "Threshold 조정",
-            "SHAP 해석",
-            "Row 검토",
-            "위험 모니터링",
-            "AI Report",
-            "데이터 예측",
-            "회사 데이터 재학습",
-            "운영 감사",
-            "공개 산업 데이터 검증",
-            "현장 검증 템플릿",
-            "제품 비교 근거",
-            "연구 검증",
-        ]
+    admin_pages = [
+        "성능 요약",
+        "모델 비교",
+        "Threshold 조정",
+        "SHAP 해석",
+        "Row 검토",
+        "위험 모니터링",
+        "AI Report",
+        "데이터 예측",
+        "회사 데이터 재학습",
+        "운영 감사",
+        "공개 산업 데이터 검증",
+        "현장 검증 템플릿",
+        "제품 비교 근거",
+        "연구 검증",
+    ]
+    selected_page = st.sidebar.radio(
+        "Admin 화면",
+        options=admin_pages,
+        index=0,
+        key="admin_navigation",
     )
+    st.caption(f"현재 화면: {selected_page}")
 
-    with tabs[0]:
+    if selected_page == "성능 요약":
         render_summary_tab(metrics, threshold_summary)
-    with tabs[1]:
+    elif selected_page == "모델 비교":
         render_model_tab(metrics)
-    with tabs[2]:
+    elif selected_page == "Threshold 조정":
         render_threshold_tab(threshold_summary)
-    with tabs[3]:
+    elif selected_page == "SHAP 해석":
         render_shap_tab()
-    with tabs[4]:
+    elif selected_page == "Row 검토":
         render_row_simulation_tab(predictions, threshold_summary)
-    with tabs[5]:
+    elif selected_page == "위험 모니터링":
         render_predictive_spc_tab(spc_summary, spc_timeseries)
-    with tabs[6]:
+    elif selected_page == "AI Report":
         render_ai_report_tab(
             spc_summary,
             spc_timeseries,
@@ -4937,19 +5193,19 @@ def render_admin_app() -> None:
             ai_manager_report,
             genai_settings,
         )
-    with tabs[7]:
+    elif selected_page == "데이터 예측":
         render_field_csv_tab(threshold_summary)
-    with tabs[8]:
+    elif selected_page == "회사 데이터 재학습":
         render_company_retraining_tab()
-    with tabs[9]:
+    elif selected_page == "운영 감사":
         render_admin_monitoring(ai_context)
-    with tabs[10]:
+    elif selected_page == "공개 산업 데이터 검증":
         render_open_industrial_validation_tab()
-    with tabs[11]:
+    elif selected_page == "현장 검증 템플릿":
         render_field_validation_evidence_tab()
-    with tabs[12]:
+    elif selected_page == "제품 비교 근거":
         render_industrial_engineering_evidence_tab()
-    with tabs[13]:
+    elif selected_page == "연구 검증":
         render_research_validation_tab()
 
 
