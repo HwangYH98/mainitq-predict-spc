@@ -21,6 +21,8 @@ OPERATIONS_DB_PATH = OUTPUT_DIR / "operations.db"
 STAGE15_20_ARCHITECTURE_PATH = OUTPUT_DIR / "stage15_20_architecture.md"
 WORK_ORDER_DECISIONS_PATH = OUTPUT_DIR / "work_order_decisions.csv"
 LOCAL_NOTES_DIR = PROJECT_ROOT / "local_presentation_notes"
+ACCEPTED_RESEARCH_RUN_MANIFEST = PROJECT_ROOT / "app" / "accepted_research_run.json"
+EXPERIMENTS_DIR = OUTPUT_DIR / "experiments"
 
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
@@ -402,6 +404,15 @@ def load_predictions(path: Path) -> pd.DataFrame:
 def load_csv(path: Path) -> pd.DataFrame:
     """Load a saved CSV artifact."""
     return pd.read_csv(path)
+
+
+@st.cache_data
+def load_optional_json(path: Path) -> dict:
+    """Load an optional JSON artifact without creating or updating it."""
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as file:
+        return json.load(file)
 
 
 def sample_field_dataframe() -> pd.DataFrame:
@@ -4716,6 +4727,122 @@ def render_local_notes_tab() -> None:
             st.markdown(path.read_text(encoding="utf-8"))
 
 
+def accepted_research_run_paths() -> tuple[dict, dict[str, Path], list[Path]]:
+    """Return accepted research artifact paths selected by the fixed manifest."""
+    manifest = load_optional_json(ACCEPTED_RESEARCH_RUN_MANIFEST)
+    accepted_run_id = str(manifest.get("accepted_run_id", "")).strip()
+    if not accepted_run_id or "\\" in accepted_run_id or "/" in accepted_run_id:
+        return manifest, {}, [ACCEPTED_RESEARCH_RUN_MANIFEST]
+
+    run_dir = EXPERIMENTS_DIR / accepted_run_id
+    paths = {
+        "run_manifest": run_dir / "run_manifest.json",
+        "baseline_report": run_dir / "baseline_test_report.json",
+        "data_manifest": run_dir / "data_manifest.json",
+        "summary": run_dir / "metrics" / "robust_validation_summary.json",
+        "fold_metrics": run_dir / "metrics" / "robust_validation_fold_metrics.csv",
+        "bootstrap": run_dir / "metrics" / "robust_validation_bootstrap.csv",
+        "metric_figure": run_dir / "figures" / "robust_validation_metric_distribution.png",
+        "threshold_figure": run_dir / "figures" / "robust_validation_threshold_distribution.png",
+    }
+    missing = [path for path in paths.values() if not path.exists()]
+    return manifest, paths, missing
+
+
+def render_research_validation_tab() -> None:
+    """Render accepted experiment artifacts without running experiments."""
+    st.subheader("연구 검증 결과")
+    st.caption("운영 분석과 분리된 읽기 전용 화면입니다. 실험 재실행이나 운영 정책 변경을 수행하지 않습니다.")
+
+    accepted_manifest, paths, missing = accepted_research_run_paths()
+    if not accepted_manifest.get("accepted_run_id") or missing:
+        st.info("검증 결과 없음")
+        if missing:
+            st.write("다음 파일을 찾지 못했습니다.")
+            for path in missing:
+                display_path = path.relative_to(PROJECT_ROOT) if path.is_absolute() else path
+                st.code(str(display_path), language="text")
+        return
+
+    run_manifest = load_json(paths["run_manifest"])
+    baseline_report = load_json(paths["baseline_report"])
+    data_manifest = load_json(paths["data_manifest"])
+    summary = load_json(paths["summary"])
+    fold_metrics = load_csv(paths["fold_metrics"])
+    bootstrap = load_csv(paths["bootstrap"])
+
+    run_id = str(run_manifest.get("run_id", accepted_manifest["accepted_run_id"]))
+    git = run_manifest.get("git", {})
+    data_sha = data_manifest.get("sha256", "")
+    status = accepted_manifest.get("accepted_status", "")
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        metric_card("Run ID", run_id, status or "accepted manifest")
+    with col2:
+        metric_card("Commit", str(git.get("commit", ""))[:12], "dirty=false 기준")
+    with col3:
+        metric_card("Data SHA-256", str(data_sha)[:12], "AI4I 2020")
+    with col4:
+        metric_card("Executed", str(run_manifest.get("created_at_utc", "")), "UTC")
+
+    checks = {
+        str(row.get("metric")): row
+        for row in baseline_report.get("checks", [])
+        if row.get("metric")
+    }
+    fixed_rows = [
+        {"Metric": "Threshold", "Value": checks.get("selected_threshold", {}).get("observed")},
+        {"Metric": "Precision", "Value": checks.get("precision", {}).get("observed")},
+        {"Metric": "Recall", "Value": checks.get("recall", {}).get("observed")},
+        {"Metric": "F1-score", "Value": checks.get("f1_score", {}).get("observed")},
+        {"Metric": "PR-AUC", "Value": checks.get("pr_auc", {}).get("observed")},
+        {"Metric": "ROC-AUC", "Value": checks.get("roc_auc", {}).get("observed")},
+        {"Metric": "Isotonic Brier", "Value": checks.get("test_brier", {}).get("observed")},
+    ]
+    st.markdown("#### 대표 고정 테스트 결과")
+    st.dataframe(pd.DataFrame(fixed_rows), width="stretch", hide_index=True)
+
+    st.markdown("#### 반복 교차검증 평균·표준편차")
+    st.dataframe(pd.DataFrame(summary.get("fold_metric_summary", [])), width="stretch", hide_index=True)
+
+    st.markdown("#### 95% 신뢰구간")
+    display_bootstrap = bootstrap[
+        bootstrap["metric"].isin(["precision", "recall", "f1_score", "pr_auc", "roc_auc"])
+    ].copy()
+    st.dataframe(display_bootstrap, width="stretch", hide_index=True)
+
+    st.markdown("#### Fold별 성능")
+    fold_columns = [
+        "repeat",
+        "fold",
+        "selected_threshold",
+        "calibration_method",
+        "outer_test_precision",
+        "outer_test_recall",
+        "outer_test_f1_score",
+        "outer_test_pr_auc",
+        "outer_test_roc_auc",
+    ]
+    st.dataframe(fold_metrics[[column for column in fold_columns if column in fold_metrics.columns]], width="stretch", hide_index=True)
+
+    col_fig1, col_fig2 = st.columns(2)
+    with col_fig1:
+        st.image(str(paths["metric_figure"]), caption="Fold별 성능 분포", width="stretch")
+    with col_fig2:
+        st.image(str(paths["threshold_figure"]), caption="내부 검증 선택 임계값 분포", width="stretch")
+
+    st.markdown(
+        """
+        <div class="callout">
+        이 결과는 AI4I 공개 데이터 내부 반복 검증 결과입니다. Desktop·Streamlit 운영 정책의 raw 0.86 기준은 변경하지 않았으며,
+        실제 현장 데이터 성능, 시간 기반 고장 리드타임, 비용 절감 또는 작업자 사용성 검증으로 해석하지 않습니다.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_user_app() -> None:
     """Render the product MVP dashboard only."""
     ensure_required_files(USER_REQUIRED_FILE_KEYS)
@@ -4785,6 +4912,7 @@ def render_admin_app() -> None:
             "공개 산업 데이터 검증",
             "현장 검증 템플릿",
             "제품 비교 근거",
+            "연구 검증",
         ]
     )
 
@@ -4821,6 +4949,8 @@ def render_admin_app() -> None:
         render_field_validation_evidence_tab()
     with tabs[12]:
         render_industrial_engineering_evidence_tab()
+    with tabs[13]:
+        render_research_validation_tab()
 
 
 def main(app_mode: str = "user") -> None:
