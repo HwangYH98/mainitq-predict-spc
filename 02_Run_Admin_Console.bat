@@ -9,12 +9,17 @@ if exist ".venv\Scripts\python.exe" (
     set "PYTHON=.venv\Scripts\python.exe"
 ) else (
     echo Virtual environment was not found.
-    echo Please run:
+    echo Please run these commands from this folder:
     echo   py -3 -m venv .venv
-    echo   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+    echo   .\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
     pause
     exit /b 1
 )
+
+if not defined ADMIN_CONSOLE_PORT (
+    set "ADMIN_CONSOLE_PORT=8502"
+)
+set "ADMIN_CONSOLE_URL=http://127.0.0.1:%ADMIN_CONSOLE_PORT%"
 
 if not defined APP_ADMIN_PASSWORD (
     echo.
@@ -33,15 +38,24 @@ if not defined APP_ADMIN_PASSWORD (
     echo Admin console password was received for this session only.
 )
 
-echo Starting MaintiQ Admin Console on http://127.0.0.1:8502 ...
-"%PYTHON%" -m streamlit run app\admin_dashboard.py --server.port 8502 --server.headless true --browser.gatherUsageStats false
+echo.
+echo Starting MaintiQ Admin Console
+echo URL: %ADMIN_CONSOLE_URL%
+echo Login ID: admin
+echo Password: the APP_ADMIN_PASSWORD value for this session
+echo.
+echo If the browser does not open, paste the URL above into your browser.
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 3; Start-Process '%ADMIN_CONSOLE_URL%'" >nul 2>nul
+"%PYTHON%" -m streamlit run app\admin_dashboard.py --server.port %ADMIN_CONSOLE_PORT% --server.headless true --browser.gatherUsageStats false
 if errorlevel 1 goto error
 exit /b 0
 
 :error
 echo.
 echo Admin console failed. Please read the error message above.
-echo If Streamlit is missing, run:
-echo   "%PYTHON%" -m pip install -r requirements.txt
+echo Common fixes:
+echo   1. Close any existing app using port %ADMIN_CONSOLE_PORT%, or set ADMIN_CONSOLE_PORT to another value.
+echo   2. Install dependencies:
+echo      "%PYTHON%" -m pip install -r requirements-lock.txt
 pause
 exit /b 1

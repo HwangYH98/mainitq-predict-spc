@@ -50,28 +50,39 @@ Direct execution:
 .\.venv\Scripts\python.exe desktop_app\main.py
 ```
 
-### 3. Run Streamlit with one click
+### 3. Run the Streamlit operator dashboard with one click
 
-Streamlit cannot be opened by double-clicking a local `.py` or `.html` file. It starts a local Python server, then opens the browser.
+Streamlit cannot be opened by double-clicking a local `.py` or `.html` file. Use the root BAT file below. It starts a local Python server, opens the browser, and prints the session login details.
 
 ```powershell
 .\04_Run_Streamlit_Dashboard.bat
 ```
 
-The script creates a temporary operator password, copies it to the clipboard, starts Streamlit, and opens `http://127.0.0.1:8501`. To use another port:
+The script creates a temporary operator password, copies it to the clipboard, starts Streamlit, and opens `http://127.0.0.1:8501`.
+
+- URL: `http://127.0.0.1:8501`
+- Login ID: `operator_01`
+- Password: printed by the BAT file and copied to the clipboard
+
+To use another port:
 
 ```powershell
 $env:STREAMLIT_PORT="8503"
 .\04_Run_Streamlit_Dashboard.bat
 ```
 
-### 4. Run the Admin console
+### 4. Run the research validation Admin console
 
 ```powershell
 .\02_Run_Admin_Console.bat
 ```
 
-Admin console URL: `http://127.0.0.1:8502`.
+The Admin console is separated from the operator dashboard. It shows research validation, accepted run artifacts, benchmark evidence, and reproducibility files without changing the Desktop or Streamlit operating policy.
+
+- URL: `http://127.0.0.1:8502`
+- Login ID: `admin`
+- Password: entered into the BAT file for the current session only
+- Accepted research run: fixed by `app/accepted_research_run.json`
 
 Passwords and API keys are session-only. Do not store them in `.env`, README, outputs, screenshots, or Git history.
 
