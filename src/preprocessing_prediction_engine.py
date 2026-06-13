@@ -22,6 +22,7 @@ from data import load_data, preprocess_data, preprocess_features
 from final_policy import FINAL_POLICY_ID, FINAL_PROBABILITY_BASIS, FINAL_RAW_THRESHOLD, final_policy_dict
 from thesis_methodology_validation import split_60_20_20
 from train_baseline import RANDOM_STATE, build_models
+from work_order_prefill import EQUIPMENT_ID_COLUMNS
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -818,6 +819,11 @@ def predict_company_sensor_csv(
     )
     result_df = canonical_df.copy()
     result_df.insert(0, "input_row", range(len(result_df)))
+    source_columns_by_lower = {str(column).lower(): str(column) for column in df.columns}
+    for column in EQUIPMENT_ID_COLUMNS:
+        source_column = source_columns_by_lower.get(column.lower())
+        if source_column and source_column not in result_df.columns:
+            result_df.insert(1, source_column, df[source_column].fillna("").astype(str))
     result_df["engine_profile"] = "full"
     result_df["score_method"] = "정밀 예측 엔진"
     result_df["interpretation_note"] = (
