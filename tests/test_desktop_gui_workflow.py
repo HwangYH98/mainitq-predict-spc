@@ -307,6 +307,14 @@ def test_desktop_full_navigation_and_major_button_contracts(monkeypatch, tmp_pat
     assert prediction_page.prediction_result
     assert prediction_page.quick_export_button.isEnabled()
     assert prediction_page.export_button.isEnabled()
+    assert prediction_page.open_monitoring_button.isEnabled()
+    click_and_drain(prediction_page.open_monitoring_button)
+    assert window.stack.currentIndex() == 2
+    monitoring_page = window.page_instances["monitoring"]
+    assert "현재 표시 중" in monitoring_page.status_label.text()
+    assert "company_prediction_results.csv" in monitoring_page.status_label.text()
+    window.set_page(1)
+    app.processEvents()
     assert not prediction_page.open_folder_button.isEnabled() or prediction_page.last_saved_path
     click_and_drain(prediction_page.quick_export_button)
     assert prediction_page.last_saved_path and prediction_page.last_saved_path.exists()

@@ -999,6 +999,40 @@ def metric_card(label: str, value: str, note: str) -> None:
     )
 
 
+def render_operator_workflow_status() -> None:
+    """Render the top-level operator progress status without changing app state."""
+    upload_name = st.session_state.get("smart_csv_upload_name")
+    prediction_result = st.session_state.get("smart_csv_prediction_result")
+    prediction_ready = isinstance(prediction_result, dict) and prediction_result.get("result_df") is not None
+    high_risk_count = "-"
+    if prediction_ready:
+        result_df = prediction_result["result_df"]
+        if "risk_status" in result_df.columns:
+            high_risk_count = str(int((result_df["risk_status"] == "High Risk").sum()))
+
+    steps = [
+        ("1. CSV 업로드", "완료" if upload_name else "대기", str(upload_name or "샘플 또는 CSV 선택")),
+        ("2. 예측 실행", "완료" if prediction_ready else "대기", "고위험 " + high_risk_count if prediction_ready else "전처리와 예측 실행"),
+        ("3. 위험 모니터링", "준비됨" if prediction_ready else "기준 SPC", "업로드 결과 우선 표시" if prediction_ready else "저장된 기준 결과 표시"),
+        ("4. 리포트/작업지시", "선택", "API key와 작업자 승인 흐름"),
+    ]
+    st.markdown("#### 운영 진행 상태")
+    columns = st.columns(4)
+    for column, (label, value, note) in zip(columns, steps):
+        with column:
+            metric_card(label, value, note)
+
+
+def show_operator_error(problem: str, causes: str, action: str, detail: object | None = None) -> None:
+    """Show operator-facing errors in a consistent problem/cause/action format."""
+    st.error(f"문제: {problem}")
+    st.warning(f"원인 후보: {causes}")
+    st.info(f"해결 방법: {action}")
+    if detail is not None:
+        with st.expander("기술 상세 보기"):
+            st.code(str(detail), language="text")
+
+
 def render_header(
     badge: str = "운영 대시보드",
     title: str = "AI 예지보전 운영 대시보드",
@@ -1628,12 +1662,20 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
     try:
         uploaded_df = pd.read_csv(uploaded_file)
     except Exception as error:
-        st.error("CSV 파일을 읽는 중 문제가 발생했습니다.")
-        st.code(str(error), language="text")
+        show_operator_error(
+            "CSV 파일을 읽지 못했습니다.",
+            "파일 인코딩, 깨진 구분자, 비어 있는 파일, CSV가 아닌 파일 확장자일 수 있습니다.",
+            "샘플 CSV를 내려받아 같은 형식으로 저장한 뒤 다시 업로드하세요.",
+            error,
+        )
         return
 
     if uploaded_df.empty:
-        st.error("업로드한 CSV에 row가 없습니다.")
+        show_operator_error(
+            "업로드한 CSV에 row가 없습니다.",
+            "헤더만 있거나 필터링된 빈 파일을 업로드했을 수 있습니다.",
+            "센서 값이 포함된 CSV를 다시 업로드하세요.",
+        )
         return
 
     upload_name = str(getattr(uploaded_file, "name", "company_csv"))
@@ -1646,10 +1688,10 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
 
     public_benchmark = detect_public_benchmark_upload(uploaded_df)
     if public_benchmark:
-        st.warning(
-            f"{public_benchmark} 원본 CSV는 제품 예측 업로드 형식이 아닙니다. "
-            "공개 데이터셋 평가는 Admin 콘솔의 공개 산업 데이터 검증 화면이나 "
-            "`src\\public_industrial_benchmark.py`에서 실행하세요."
+        show_operator_error(
+            f"{public_benchmark} 원본 CSV는 제품 예측 업로드 형식이 아닙니다.",
+            f"{public_benchmark}의 spec, label, tte 또는 공개 벤치마크 원본 파일을 운영 예측 화면에 넣었습니다.",
+            "운영 예측에는 기본 센서 CSV 또는 SCANIA readout CSV를 사용하고, 공개 데이터 검증은 Admin 콘솔에서 실행하세요.",
         )
         return
 
@@ -1685,8 +1727,12 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
                     {"schema": "scania"},
                     error_message=str(error),
                 )
-                st.error("SCANIA 예측 중 문제가 발생했습니다.")
-                st.code(str(error), language="text")
+                show_operator_error(
+                    "SCANIA 예측을 완료하지 못했습니다.",
+                    "필수 readout 컬럼 누락, 숫자 형식 오류, 지원하지 않는 SCANIA 파일 구조일 수 있습니다.",
+                    "SCANIA 샘플 readout 형식과 컬럼을 맞춘 뒤 다시 실행하세요.",
+                    error,
+                )
                 return
     else:
         suggested_mapping = infer_column_mapping(uploaded_df)
@@ -1767,9 +1813,12 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
                     {"mapping": mapping, "unit_conversions": unit_conversions, "policy_id": policy_id},
                     error_message=str(error),
                 )
-                st.error("전처리 또는 예측 중 문제가 발생했습니다.")
-                st.warning("컬럼 매핑, 단위 선택, 숫자 형식, Type 값, 결측값을 확인하세요.")
-                st.code(str(error), language="text")
+                show_operator_error(
+                    "전처리 또는 예측을 완료하지 못했습니다.",
+                    "필수 센서 컬럼 누락, 잘못된 단위 선택, 숫자 형식 오류, Type 값 오류, 결측값이 원인일 수 있습니다.",
+                    "컬럼 확인 영역에서 매핑과 단위를 고치거나 샘플 CSV 형식으로 다시 업로드하세요.",
+                    error,
+                )
                 return
 
     result = st.session_state.get("smart_csv_prediction_result")
@@ -1790,7 +1839,11 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         "",
     )
     if not probability_column:
-        st.error("예측 결과에 확률 컬럼이 없습니다.")
+        show_operator_error(
+            "예측 결과에 확률 컬럼이 없습니다.",
+            "예측 엔진 반환 계약이 깨졌거나 지원하지 않는 결과 구조가 전달되었습니다.",
+            "예측을 다시 실행하고 같은 문제가 반복되면 검증 로그를 확인하세요.",
+        )
         return
     high_risk_count = int((result_df["risk_status"] == "High Risk").sum())
     max_probability = float(pd.to_numeric(result_df[probability_column], errors="coerce").max())
@@ -1808,6 +1861,15 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         metric_card("최고 고장확률", f"{max_probability:.4f}", probability_label)
     with col4:
         metric_card("입력 품질", quality_value, quality_report["quality_status"])
+    st.markdown(
+        """
+        <div class="callout">
+        다음 행동: 상단의 <strong>위험 모니터링</strong> 탭을 열면 방금 업로드한 예측 결과 기준으로
+        위험 확률 추세와 고위험 우선순위가 바로 표시됩니다.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.caption(
         f"최종 판정 기준: {result['policy_id']} / {policy.get('probability_basis', 'raw_probability')} "
         f">= {float(policy['threshold']):.2f}"
@@ -1851,12 +1913,6 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         }
     )
     st.dataframe(priority_display, width="stretch", hide_index=True)
-    st.download_button(
-        "위험 우선순위 CSV 다운로드",
-        data=csv_download_bytes(priority_df),
-        file_name="company_risk_priority_queue.csv",
-        mime="text/csv",
-    )
 
     with st.expander("데이터 품질 상세 보기"):
         if quality_df.empty:
@@ -1872,7 +1928,7 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
             )
             st.dataframe(quality_display, width="stretch", hide_index=True)
 
-    st.markdown("#### 예측 결과표와 다운로드")
+    st.markdown("#### 예측 결과표")
     probability_display_columns = ["raw_probability"]
     if probability_column != "raw_probability" and probability_column in result_df.columns:
         probability_display_columns.append(probability_column)
@@ -1914,12 +1970,22 @@ def render_field_csv_tab(threshold_summary: dict) -> None:
         width="stretch",
         hide_index=True,
     )
-    st.download_button(
-        "예측 결과 CSV 다운로드",
-        data=csv_download_bytes(result_df),
-        file_name="scania_product_predictions.csv" if result.get("schema") == "scania" else "company_prediction_results.csv",
-        mime="text/csv",
-    )
+    st.markdown("#### 다운로드")
+    download_col1, download_col2 = st.columns(2)
+    with download_col1:
+        st.download_button(
+            "예측 결과 CSV",
+            data=csv_download_bytes(result_df),
+            file_name="scania_product_predictions.csv" if result.get("schema") == "scania" else "company_prediction_results.csv",
+            mime="text/csv",
+        )
+    with download_col2:
+        st.download_button(
+            "위험 우선순위 CSV",
+            data=csv_download_bytes(priority_df),
+            file_name="company_risk_priority_queue.csv",
+            mime="text/csv",
+        )
 
     if result.get("policies"):
         policy_rows = []
@@ -2531,9 +2597,112 @@ def render_artifact_downloads() -> None:
                 )
 
 
-def render_predictive_spc_tab(spc_summary: dict, spc_timeseries: pd.DataFrame) -> None:
-    """Render the simulated time-series and Predictive SPC outputs."""
+def uploaded_monitoring_probability_column(result_df: pd.DataFrame) -> str:
+    """Pick the probability column used for upload-session monitoring."""
+    for column in ["raw_probability", "failure_window_probability", "xgboost_probability", "probability", "calibrated_probability"]:
+        if column in result_df.columns:
+            return column
+    return ""
+
+
+def render_uploaded_prediction_monitoring(result: dict) -> bool:
+    """Render risk monitoring from the current uploaded prediction result."""
+    result_df = result.get("result_df")
+    priority_df = result.get("priority_df")
+    if not isinstance(result_df, pd.DataFrame) or result_df.empty:
+        return False
+    if not isinstance(priority_df, pd.DataFrame) or priority_df.empty:
+        priority_df = result_df.copy()
+
+    probability_column = uploaded_monitoring_probability_column(result_df)
+    if not probability_column:
+        show_operator_error(
+            "현재 업로드 예측 결과에 확률 컬럼이 없습니다.",
+            "예측 결과 파일이 손상됐거나 지원하지 않는 결과 구조일 수 있습니다.",
+            "데이터 예측 탭에서 예측을 다시 실행하세요. 저장된 SPC 기준 화면은 아래에 계속 표시됩니다.",
+        )
+        return False
+
+    monitor_df = result_df.copy()
+    if "input_row" not in monitor_df.columns:
+        monitor_df.insert(0, "input_row", range(len(monitor_df)))
+
+    probability_series = pd.to_numeric(monitor_df[probability_column], errors="coerce")
+    risk_series = monitor_df.get("risk_status", pd.Series([""] * len(monitor_df), index=monitor_df.index))
+    high_risk_count = int((risk_series == "High Risk").sum())
+    max_probability = float(probability_series.max()) if probability_series.notna().any() else 0.0
+    threshold = result.get("policy", {}).get("threshold")
+    if threshold is None and "selected_threshold" in monitor_df.columns and not monitor_df["selected_threshold"].empty:
+        threshold = monitor_df["selected_threshold"].iloc[0]
+
     st.subheader("위험 모니터링")
+    st.caption(
+        "방금 업로드해 예측한 CSV 기준으로 위험 확률 추세와 우선순위를 표시합니다. "
+        "새 CSV를 업로드하면 이 화면도 같은 세션 결과로 갱신됩니다."
+    )
+    st.markdown("#### 업로드 결과 기준 모니터링")
+    st.info("현재 화면은 업로드 예측 결과 기준입니다. 저장된 AI4I SPC 기준 화면은 아래 expander에서 따로 확인할 수 있습니다.")
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        metric_card("Rows", str(len(monitor_df)), "업로드 예측 row")
+    with col2:
+        metric_card("High Risk", str(high_risk_count), "위험 판정 row")
+    with col3:
+        metric_card("Max Probability", f"{max_probability:.4f}", probability_column)
+    with col4:
+        threshold_text = f"{float(threshold):.2f}" if threshold is not None else "-"
+        metric_card("Threshold", threshold_text, "운영 판정 기준")
+
+    chart_columns = ["input_row", probability_column]
+    if "raw_probability" in monitor_df.columns and probability_column != "raw_probability":
+        chart_columns.append("raw_probability")
+    chart_df = monitor_df[chart_columns].rename(
+        columns={
+            "input_row": "입력 row",
+            probability_column: "위험 확률",
+            "raw_probability": "원 확률",
+        }
+    )
+    st.markdown("#### 업로드 데이터 위험 확률 추세")
+    st.line_chart(chart_df.set_index("입력 row"), height=320)
+
+    st.markdown("#### 고위험 우선순위")
+    priority_columns = [
+        "priority_rank",
+        "vehicle_id",
+        "input_row",
+        probability_column,
+        "risk_priority_score",
+        "risk_status",
+        "recommendation",
+    ]
+    priority_display = priority_df[[column for column in priority_columns if column in priority_df.columns]].head(30).rename(
+        columns={
+            "priority_rank": "우선순위",
+            "vehicle_id": "설비 ID",
+            "input_row": "입력 row",
+            probability_column: "위험 확률",
+            "risk_priority_score": "우선순위 점수",
+            "risk_status": "위험 상태",
+            "recommendation": "추천 조치",
+        }
+    )
+    st.dataframe(priority_display, width="stretch", hide_index=True)
+    st.markdown("#### 다운로드")
+    st.download_button(
+        "현재 업로드 모니터링 CSV",
+        data=csv_download_bytes(monitor_df),
+        file_name="current_uploaded_risk_monitoring.csv",
+        mime="text/csv",
+    )
+    return True
+
+
+def render_saved_spc_monitoring(spc_summary: dict, spc_timeseries: pd.DataFrame) -> None:
+    """Render the saved AI4I SPC monitoring artifacts."""
+    st.subheader("위험 모니터링")
+    st.markdown("#### 저장된 SPC 기준 모니터링")
     st.caption(
         "저장된 센서 row 순서를 시간축처럼 재구성해 고장 확률 추세, 관리한계, 고위험 구간을 확인합니다."
     )
@@ -2593,6 +2762,18 @@ def render_predictive_spc_tab(spc_summary: dict, spc_timeseries: pd.DataFrame) -
         width="stretch",
         hide_index=True,
     )
+
+
+def render_predictive_spc_tab(spc_summary: dict, spc_timeseries: pd.DataFrame) -> None:
+    """Render upload-session monitoring first, then saved SPC outputs."""
+    uploaded_result = st.session_state.get("smart_csv_prediction_result")
+    if isinstance(uploaded_result, dict) and render_uploaded_prediction_monitoring(uploaded_result):
+        with st.expander("저장된 SPC 기준 화면 보기"):
+            render_saved_spc_monitoring(spc_summary, spc_timeseries)
+        return
+
+    st.info("현재 세션의 업로드 예측 결과가 없어 저장된 SPC 기준 모니터링을 표시합니다.")
+    render_saved_spc_monitoring(spc_summary, spc_timeseries)
 
 
 def build_selected_report_context(
@@ -2746,11 +2927,12 @@ def render_ai_report_tab(
                 },
                 error_message=str(error),
             )
-            st.error(
-                f"{genai_settings['provider_label']} API 호출에 실패했습니다. "
-                f"model={genai_settings['model']}. API key는 표시하거나 저장하지 않았습니다."
+            show_operator_error(
+                f"{genai_settings['provider_label']} API 호출에 실패했습니다.",
+                f"API key 권한, 네트워크 연결, 모델명({genai_settings['model']}) 또는 제공자 상태 문제일 수 있습니다.",
+                "사이드바의 API key와 모델명을 확인하세요. API key는 화면에 표시하거나 파일에 저장하지 않습니다.",
+                error,
             )
-            st.code(str(error), language="text")
             return
         record_audit(
             "genai.report",
@@ -2765,8 +2947,9 @@ def render_ai_report_tab(
         )
         st.success(f"리포트 생성 모드: {mode}")
         st.markdown(report)
+        st.markdown("#### 다운로드")
         st.download_button(
-            "생성 리포트 다운로드",
+            "생성 리포트 파일",
             data=report.encode("utf-8"),
             file_name="selected_ai_manager_report.md",
             mime="text/markdown",
@@ -2774,8 +2957,9 @@ def render_ai_report_tab(
     else:
         st.markdown("### 저장된 기본 리포트")
         st.markdown(saved_report)
+        st.markdown("#### 다운로드")
         st.download_button(
-            "저장된 AI 리포트 다운로드",
+            "저장된 리포트 파일",
             data=saved_report.encode("utf-8"),
             file_name="ai_manager_report.md",
             mime="text/markdown",
@@ -2951,8 +3135,12 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
                     {"source_system": source_system},
                     error_message=str(error),
                 )
-                st.error("센서 이벤트 생성 중 문제가 발생했습니다.")
-                st.exception(error)
+                show_operator_error(
+                    "센서 이벤트를 생성하지 못했습니다.",
+                    "센서 값 범위, 숫자 형식, 이벤트 시각, 운영 DB 상태가 원인일 수 있습니다.",
+                    "입력값을 확인하고 다시 저장하세요. 반복되면 운영 DB 상태를 확인하세요.",
+                    error,
+                )
             else:
                 record_audit(
                     "field_event.create",
@@ -3001,8 +3189,12 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
                         selected_event_id,
                         error_message=str(error),
                     )
-                    st.error("작업지시 초안 생성 중 문제가 발생했습니다.")
-                    st.exception(error)
+                    show_operator_error(
+                        "작업지시 초안을 생성하지 못했습니다.",
+                        "선택한 센서 이벤트가 없거나 운영 DB 쓰기 문제가 있을 수 있습니다.",
+                        "센서 이벤트를 다시 선택하거나 새 이벤트를 생성한 뒤 다시 시도하세요.",
+                        error,
+                    )
                 else:
                     record_audit(
                         "work_order_draft.create",
@@ -3069,8 +3261,12 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
                         {"decision": decision, "operator_id": operator_id},
                         error_message=str(error),
                     )
-                    st.error("결정 기록 중 문제가 발생했습니다.")
-                    st.exception(error)
+                    show_operator_error(
+                        "작업자 결정을 저장하지 못했습니다.",
+                        "선택한 초안 ID, 작업자 ID, 운영 DB 쓰기 상태가 원인일 수 있습니다.",
+                        "초안을 다시 선택하고 작업자 ID와 메모를 확인한 뒤 저장하세요.",
+                        error,
+                    )
                 else:
                     record_audit(
                         "work_order_decision.create",
@@ -5106,6 +5302,8 @@ def render_user_app() -> None:
     ai_context = load_json(REQUIRED_FILES["ai_report_context"])
     ai_manager_report = load_markdown(REQUIRED_FILES["ai_manager_report"])
     genai_settings = render_genai_sidebar_settings()
+
+    render_operator_workflow_status()
 
     tabs = st.tabs(
         [

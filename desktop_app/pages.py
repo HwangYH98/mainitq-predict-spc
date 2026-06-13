@@ -27,7 +27,7 @@ from desktop_app.widgets import stylesheet
 from desktop_app.work_order_page import WorkOrderPage
 
 
-NAV_LABELS = ["홈", "데이터 예측", "위험 분석", "AI 리포트", "작업지시"]
+NAV_LABELS = ["홈", "데이터 예측", "위험 모니터링", "AI 리포트", "작업지시"]
 
 
 class MainWindow(QMainWindow):
@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
         }
         self.page_order = ["home", "prediction", "monitoring", "ai_report", "work_order"]
         self.page_instances["prediction"].prediction_completed.connect(self.refresh_related_pages)
+        self.page_instances["prediction"].monitoring_requested.connect(lambda: self.set_page(2))
         pages = [
             (NAV_LABELS[0], self.page_instances["home"]),
             (NAV_LABELS[1], self.page_instances["prediction"]),
@@ -95,7 +96,7 @@ class MainWindow(QMainWindow):
         crash_button.clicked.connect(self.export_crash_logs)
         sidebar_layout.addWidget(update_button)
         sidebar_layout.addWidget(crash_button)
-        session_label = QLabel("로컬 워크스테이션")
+        session_label = QLabel("로컬 워크스테이션 · 운영자 화면")
         session_label.setObjectName("sidebarSubtitle")
         session_label.setWordWrap(True)
         sidebar_layout.addWidget(session_label)
@@ -152,7 +153,7 @@ class MainWindow(QMainWindow):
                 f"{result.message}\n\n"
                 f"현재 버전: {result.current_version}\n"
                 f"최신 버전: {result.latest_version}\n\n"
-                "GitHub Release 페이지를 열어 설치파일을 내려받을 수 있습니다."
+                "GitHub Release 페이지에서 설치파일을 내려받을 수 있습니다."
             )
             answer = QMessageBox.question(
                 self,
