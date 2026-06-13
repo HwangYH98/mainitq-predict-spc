@@ -3,7 +3,17 @@ from __future__ import annotations
 import pandas as pd
 from pathlib import Path
 
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QVBoxLayout, QWidget
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTableWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from desktop_app.formatters import set_display_table
 from desktop_app.runtime import OUTPUT_DIR, read_json
@@ -58,8 +68,11 @@ def normalize_monitoring_frame(df: pd.DataFrame, source_label: str) -> pd.DataFr
     return shown
 
 class RiskMonitoringPage(QWidget):
+    work_order_requested = Signal(dict)
+
     def __init__(self) -> None:
         super().__init__()
+        self._top_rows = pd.DataFrame()
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
 
@@ -94,12 +107,30 @@ class RiskMonitoringPage(QWidget):
 
         self.table_label = QLabel("고위험 Top rows")
         self.table_label.setObjectName("cardTitle")
+        table_actions = QHBoxLayout()
+        self.work_order_button = QPushButton("선택 row로 작업지시 준비")
+        self.work_order_button.setObjectName("successButton")
+        self.work_order_button.setEnabled(False)
+        self.work_order_button.clicked.connect(self.request_work_order_for_selected_row)
+        table_actions.addWidget(self.table_label)
+        table_actions.addStretch()
+        table_actions.addWidget(self.work_order_button)
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
         self.table.setMinimumHeight(190)
-        layout.addWidget(self.table_label)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        layout.addLayout(table_actions)
         layout.addWidget(self.table)
         self.render()
+
+    def request_work_order_for_selected_row(self) -> None:
+        if self._top_rows.empty:
+            return
+        selected_row = self.table.currentRow()
+        if selected_row < 0 or selected_row >= len(self._top_rows):
+            selected_row = 0
+        self.work_order_requested.emit(self._top_rows.iloc[selected_row].to_dict())
 
     def render(self) -> None:
         for index in reversed(range(self.summary_grid.count())):
@@ -158,9 +189,17 @@ class RiskMonitoringPage(QWidget):
 
         self.chart.plot_spc(df.tail(200))
         top_view = df.sort_values("probability", ascending=False) if "probability" in df.columns else df
+        if "risk_status" in top_view.columns:
+            high_risk_view = top_view[top_view["risk_status"].astype(str) == "High Risk"]
+            if not high_risk_view.empty:
+                top_view = high_risk_view
+        self._top_rows = top_view.head(50).reset_index(drop=True) if not top_view.empty else pd.DataFrame()
+        self.work_order_button.setEnabled(not self._top_rows.empty)
         set_display_table(
             self.table,
-            top_view.head(50),
+            self._top_rows,
             ["source", "input_row", "vehicle_id", "time_step", "probability", "selected_threshold", "risk_status", "risk_priority_score", "recommendation"],
             max_rows=50,
         )
+        if self.table.rowCount() > 0:
+            self.table.selectRow(0)

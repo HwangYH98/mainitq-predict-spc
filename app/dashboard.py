@@ -56,6 +56,7 @@ from realtime_ops import (
 )
 from scania_product_engine import looks_like_scania_csv, predict_scania_csv
 from train_baseline import RANDOM_STATE, TEST_SIZE, build_models
+from work_order_prefill import prediction_row_to_work_order_prefill
 
 REQUIRED_FILES = {
     "metrics": OUTPUT_DIR / "metrics.json",
@@ -2605,6 +2606,56 @@ def uploaded_monitoring_probability_column(result_df: pd.DataFrame) -> str:
     return ""
 
 
+def apply_work_order_prefill(prefill: dict) -> None:
+    """Fill the work-order form state from a selected monitoring row."""
+    sensor_row = prefill["sensor_row"]
+    st.session_state["stage19_equipment_id"] = prefill["equipment_id"]
+    st.session_state["stage19_event_timestamp"] = prefill["event_timestamp"]
+    st.session_state["stage19_source_system"] = prefill["source_system"]
+    st.session_state["stage19_type"] = sensor_row["Type"]
+    st.session_state["stage19_air_temp"] = float(sensor_row["Air temperature [K]"])
+    st.session_state["stage19_process_temp"] = float(sensor_row["Process temperature [K]"])
+    st.session_state["stage19_rotational_speed"] = int(sensor_row["Rotational speed [rpm]"])
+    st.session_state["stage19_torque"] = float(sensor_row["Torque [Nm]"])
+    st.session_state["stage19_tool_wear"] = int(sensor_row["Tool wear [min]"])
+
+
+def prepare_work_order_from_monitoring_row(row: pd.Series | dict) -> None:
+    """Create a sensor event from one selected prediction row and prefill the work-order form."""
+    prefill = prediction_row_to_work_order_prefill(row)
+    apply_work_order_prefill(prefill)
+    event = predict_field_event(
+        equipment_id=prefill["equipment_id"],
+        event_timestamp=prefill["event_timestamp"],
+        source_system=prefill["source_system"],
+        row=prefill["sensor_row"],
+        persist=True,
+        db_path=OPERATIONS_DB_PATH,
+    )
+    st.session_state["stage20_prefilled_event_id"] = event["event_id"]
+    st.session_state["operations_prefill_message"] = (
+        f"모니터링 row를 작업지시 입력으로 불러왔습니다: {prefill['equipment_id']} / "
+        f"{event['risk_status']} / {event['probability']:.4f}. 작업지시 탭에서 초안 생성을 누르세요."
+    )
+    record_audit(
+        "monitoring_to_work_order.prefill",
+        "success",
+        "event",
+        event["event_id"],
+        {
+            "equipment_id": prefill["equipment_id"],
+            "risk_status": event["risk_status"],
+            "probability": event["probability"],
+        },
+    )
+
+
+def format_work_order_candidate(row: pd.Series, probability_column: str, fallback_index: int) -> str:
+    probability = pd.to_numeric(pd.Series([row.get(probability_column, 0.0)]), errors="coerce").fillna(0.0).iloc[0]
+    equipment = prediction_row_to_work_order_prefill(row)["equipment_id"]
+    return f"{equipment} / row {row.get('input_row', fallback_index)} / {row.get('risk_status', '-')} / {float(probability):.4f}"
+
+
 def render_uploaded_prediction_monitoring(result: dict) -> bool:
     """Render risk monitoring from the current uploaded prediction result."""
     result_df = result.get("result_df")
@@ -2689,6 +2740,40 @@ def render_uploaded_prediction_monitoring(result: dict) -> bool:
         }
     )
     st.dataframe(priority_display, width="stretch", hide_index=True)
+
+    work_order_candidates = priority_df.copy()
+    if "input_row" not in work_order_candidates.columns:
+        work_order_candidates.insert(0, "input_row", range(len(work_order_candidates)))
+    if "risk_status" in work_order_candidates.columns:
+        high_risk_candidates = work_order_candidates[work_order_candidates["risk_status"].astype(str) == "High Risk"]
+        if not high_risk_candidates.empty:
+            work_order_candidates = high_risk_candidates
+    work_order_candidates = work_order_candidates.head(30).reset_index(drop=True)
+    if not work_order_candidates.empty:
+        st.markdown("#### 작업지시 후보 연결")
+        selected_candidate_index = st.selectbox(
+            "작업지시로 보낼 고위험 row",
+            options=list(range(len(work_order_candidates))),
+            format_func=lambda index: format_work_order_candidate(work_order_candidates.iloc[index], probability_column, index),
+            key="uploaded_monitoring_work_order_candidate",
+        )
+        st.caption(
+            "CSV에 equipment_id, machine_id, asset_id가 있으면 그 값을 설비 ID로 사용하고, "
+            "없으면 input_row를 임시 설비 식별자로 사용합니다."
+        )
+        if st.button("선택 row로 작업지시 준비", key="prepare_work_order_from_uploaded_monitoring"):
+            try:
+                prepare_work_order_from_monitoring_row(work_order_candidates.iloc[int(selected_candidate_index)])
+            except Exception as error:
+                show_operator_error(
+                    "선택 row를 작업지시 입력으로 넘기지 못했습니다.",
+                    "선택 row의 센서값, 운영 DB 쓰기 권한, 이벤트 생성 함수 상태가 원인일 수 있습니다.",
+                    "다른 row를 선택하거나 작업지시 탭에서 직접 입력하세요.",
+                    error,
+                )
+            else:
+                st.rerun()
+
     st.markdown("#### 다운로드")
     st.download_button(
         "현재 업로드 모니터링 CSV",
@@ -2762,6 +2847,28 @@ def render_saved_spc_monitoring(spc_summary: dict, spc_timeseries: pd.DataFrame)
         width="stretch",
         hide_index=True,
     )
+    saved_candidates = high_risk_view.head(30).reset_index(drop=True)
+    if not saved_candidates.empty:
+        st.markdown("#### 작업지시 후보 연결")
+        selected_candidate_index = st.selectbox(
+            "작업지시로 보낼 저장 SPC row",
+            options=list(range(len(saved_candidates))),
+            format_func=lambda index: format_work_order_candidate(saved_candidates.iloc[index], "xgboost_probability", index),
+            key="saved_spc_work_order_candidate",
+        )
+        st.caption("저장 SPC 기준 화면에서는 UDI 또는 input_row를 임시 설비 식별자로 사용합니다.")
+        if st.button("선택 row로 작업지시 준비", key="prepare_work_order_from_saved_spc"):
+            try:
+                prepare_work_order_from_monitoring_row(saved_candidates.iloc[int(selected_candidate_index)])
+            except Exception as error:
+                show_operator_error(
+                    "저장 SPC row를 작업지시 입력으로 넘기지 못했습니다.",
+                    "선택 row의 센서값, 운영 DB 쓰기 권한, 이벤트 생성 함수 상태가 원인일 수 있습니다.",
+                    "다른 row를 선택하거나 작업지시 탭에서 직접 입력하세요.",
+                    error,
+                )
+            else:
+                st.rerun()
 
 
 def render_predictive_spc_tab(spc_summary: dict, spc_timeseries: pd.DataFrame) -> None:
@@ -3056,6 +3163,9 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
     last_message = st.session_state.pop("operations_last_message", None)
     if last_message:
         st.success(last_message)
+    prefill_message = st.session_state.pop("operations_prefill_message", None)
+    if prefill_message:
+        st.info(prefill_message)
 
     st.markdown("#### 센서 row 입력")
     st.caption(
@@ -3166,9 +3276,13 @@ def render_stage19_20_input_controls(events: list[dict], drafts: list[dict]) -> 
             st.info("먼저 센서 이벤트 또는 예측 기록을 생성하세요.")
         else:
             event_map = {event["event_id"]: event for event in events}
+            event_ids = list(event_map)
+            preferred_event_id = st.session_state.get("stage20_prefilled_event_id")
+            preferred_index = event_ids.index(preferred_event_id) if preferred_event_id in event_ids else 0
             selected_event_id = st.selectbox(
                 "초안을 만들 센서 이벤트",
-                options=list(event_map),
+                options=event_ids,
+                index=preferred_index,
                 format_func=lambda event_id: (
                     f"{event_map[event_id]['risk_status']} / "
                     f"{event_map[event_id]['probability']:.4f} / {event_id[:8]}"

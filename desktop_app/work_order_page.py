@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from desktop_app.formatters import humanize_status, set_display_table
 from desktop_app.runtime import now_iso
 from desktop_app.widgets import make_card, record_audit, show_error
+from work_order_prefill import prediction_row_to_work_order_prefill
 
 
 class WorkOrderPage(QWidget):
@@ -169,6 +170,44 @@ class WorkOrderPage(QWidget):
             "Torque [Nm]": self.torque.value(),
             "Tool wear [min]": self.wear.value(),
         }
+
+    def load_prediction_row(self, row: dict) -> None:
+        prefill = prediction_row_to_work_order_prefill(row)
+        sensor_row = prefill["sensor_row"]
+        self.equipment_input.setText(prefill["equipment_id"])
+        self.timestamp_input.setText(prefill["event_timestamp"])
+        self.type_combo.setCurrentText(sensor_row["Type"])
+        self.air_temp.setValue(float(sensor_row["Air temperature [K]"]))
+        self.process_temp.setValue(float(sensor_row["Process temperature [K]"]))
+        self.speed.setValue(int(sensor_row["Rotational speed [rpm]"]))
+        self.torque.setValue(float(sensor_row["Torque [Nm]"]))
+        self.wear.setValue(int(sensor_row["Tool wear [min]"]))
+        self.latest_draft = None
+        try:
+            from realtime_ops import predict_field_event
+
+            self.latest_event = predict_field_event(
+                prefill["equipment_id"],
+                prefill["event_timestamp"],
+                prefill["source_system"],
+                sensor_row,
+                persist=True,
+            )
+            self.result_label.setText(
+                "모니터링 선택 row를 작업지시 입력으로 불러왔습니다. "
+                f"센서 이벤트 생성 완료: {humanize_status(self.latest_event['risk_status'])}, "
+                f"고장 확률 {self.latest_event['probability']:.3f}. "
+                "확인 후 작업지시 초안 생성을 누르세요."
+            )
+            record_audit(self.actor, "desktop_work_order_prefilled", "success", "event", self.latest_event["event_id"])
+            self.refresh_tables()
+        except Exception as error:
+            self.latest_event = None
+            record_audit(self.actor, "desktop_work_order_prefilled", "error", "event", "", error_message=str(error))
+            self.result_label.setText(
+                "선택 row 값을 입력 폼에 채웠지만 센서 이벤트 자동 생성은 실패했습니다. "
+                "값을 확인한 뒤 센서 이벤트 생성을 먼저 누르세요."
+            )
 
     def create_event(self) -> None:
         try:

@@ -72,6 +72,7 @@ class MainWindow(QMainWindow):
         self.page_order = ["home", "prediction", "monitoring", "ai_report", "work_order"]
         self.page_instances["prediction"].prediction_completed.connect(self.refresh_related_pages)
         self.page_instances["prediction"].monitoring_requested.connect(lambda: self.set_page(2))
+        self.page_instances["monitoring"].work_order_requested.connect(self.prepare_work_order_from_monitoring)
         pages = [
             (NAV_LABELS[0], self.page_instances["home"]),
             (NAV_LABELS[1], self.page_instances["prediction"]),
@@ -145,6 +146,11 @@ class MainWindow(QMainWindow):
     def refresh_related_pages(self) -> None:
         for page_key in ["home", "monitoring", "ai_report", "work_order"]:
             self.refresh_page(page_key)
+
+    def prepare_work_order_from_monitoring(self, row: dict) -> None:
+        work_order_page: WorkOrderPage = self.page_instances["work_order"]  # type: ignore[assignment]
+        work_order_page.load_prediction_row(row)
+        self.set_page(4)
 
     def check_updates(self) -> None:
         result = check_for_update()

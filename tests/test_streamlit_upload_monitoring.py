@@ -33,6 +33,8 @@ def test_uploaded_monitoring_uses_prediction_contract_without_rerunning_experime
 
     for required_contract in ["result_df", "priority_df", "raw_probability", "risk_status", "recommendation"]:
         assert required_contract in upload_monitor_source
+    assert "prepare_work_order_from_monitoring_row" in upload_monitor_source
+    assert "작업지시 후보 연결" in upload_monitor_source
 
     forbidden_terms = [
         "predict_company_sensor_csv(",
@@ -72,3 +74,5 @@ def test_report_and_work_order_errors_use_operator_error_format() -> None:
     assert "show_operator_error(" in functions["render_ai_report_tab"]
     assert "리포트 파일" in functions["render_ai_report_tab"]
     assert "show_operator_error(" in functions["render_stage19_20_input_controls"]
+    assert "operations_prefill_message" in functions["render_stage19_20_input_controls"]
+    assert "stage20_prefilled_event_id" in functions["render_stage19_20_input_controls"]

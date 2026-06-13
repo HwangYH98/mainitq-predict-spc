@@ -46,6 +46,22 @@ def test_smart_company_csv_prediction_outputs_priority_scores() -> None:
     assert priority_df["risk_priority_score"].is_monotonic_decreasing
 
 
+def test_prediction_preserves_optional_equipment_identifier_columns() -> None:
+    sample = sample_company_alias_dataframe()
+    sample.insert(0, "equipment_id", ["PRESS-01", "PRESS-02", "PRESS-03"])
+    sample.insert(1, "machine_id", ["M-01", "M-02", "M-03"])
+    mapping_df = infer_column_mapping(sample)
+    mapping = dict(zip(mapping_df["canonical_column"], mapping_df["suggested_source_column"]))
+
+    result = predict_company_sensor_csv(sample, mapping=mapping, write_outputs=False)
+
+    for frame_name in ["result_df", "priority_df"]:
+        frame = result[frame_name]
+        assert "equipment_id" in frame.columns
+        assert "machine_id" in frame.columns
+    assert set(result["result_df"]["equipment_id"]) == {"PRESS-01", "PRESS-02", "PRESS-03"}
+
+
 def test_missing_required_mapping_is_flagged_in_quality_report() -> None:
     result = predict_company_sensor_csv(pd.DataFrame({"unknown": [1, 2, 3]}), write_outputs=False)
     quality_df = result["quality_df"]
