@@ -1,0 +1,66 @@
+{
+  "dataset": "AI4I 2020",
+  "path": "data\\ai4i2020.csv",
+  "sha256": "dc6630cd9b1f0f853922fad78a1b6436570d3f1ec863f1dd5c4340ac56bc8a8e",
+  "rows": 10000,
+  "columns": [
+    "UDI",
+    "Product ID",
+    "Type",
+    "Air temperature [K]",
+    "Process temperature [K]",
+    "Rotational speed [rpm]",
+    "Torque [Nm]",
+    "Tool wear [min]",
+    "Machine failure",
+    "TWF",
+    "HDF",
+    "PWF",
+    "OSF",
+    "RNF"
+  ],
+  "column_count": 14,
+  "target_column": "Machine failure",
+  "target_class_counts": {
+    "0": 9661,
+    "1": 339
+  },
+  "id_columns_present": [
+    "UDI",
+    "Product ID"
+  ],
+  "leakage_columns_present": [
+    "TWF",
+    "HDF",
+    "PWF",
+    "OSF",
+    "RNF"
+  ],
+  "removed_columns": [
+    "Machine failure",
+    "UDI",
+    "Product ID",
+    "TWF",
+    "HDF",
+    "PWF",
+    "OSF",
+    "RNF"
+  ],
+  "feature_columns_after_preprocessing": [
+    "air_temperature_k",
+    "process_temperature_k",
+    "rotational_speed_rpm",
+    "torque_nm",
+    "tool_wear_min",
+    "type_h",
+    "type_l",
+    "type_m"
+  ],
+  "feature_column_count": 8,
+  "preprocessing_checks": {
+    "target_removed_from_features": true,
+    "id_columns_removed_from_features": true,
+    "leakage_columns_removed_from_features": true,
+    "type_one_hot_encoded": true
+  }
+}

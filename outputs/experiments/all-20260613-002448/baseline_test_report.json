@@ -1,0 +1,102 @@
+{
+  "status": "passed",
+  "summary": "Accepted baseline metrics match final_policy.py.",
+  "checks": [
+    {
+      "metric": "selected_threshold",
+      "observed": 0.86,
+      "expected": 0.86,
+      "passed": true
+    },
+    {
+      "metric": "precision",
+      "observed": 0.8065,
+      "expected": 0.8065,
+      "tolerance": 5e-05,
+      "passed": true
+    },
+    {
+      "metric": "recall",
+      "observed": 0.7353,
+      "expected": 0.7353,
+      "tolerance": 5e-05,
+      "passed": true
+    },
+    {
+      "metric": "f1_score",
+      "observed": 0.7692,
+      "expected": 0.7692,
+      "tolerance": 5e-05,
+      "passed": true
+    },
+    {
+      "metric": "roc_auc",
+      "observed": 0.9697,
+      "expected": 0.9697,
+      "tolerance": 5e-05,
+      "passed": true
+    },
+    {
+      "metric": "pr_auc",
+      "observed": 0.8118,
+      "expected": 0.8118,
+      "tolerance": 5e-05,
+      "passed": true
+    },
+    {
+      "metric": "brier_score",
+      "observed": 0.028006,
+      "expected": 0.028006,
+      "tolerance": 5e-07,
+      "passed": true
+    },
+    {
+      "metric": "alert_count",
+      "observed": 62,
+      "expected": 62,
+      "tolerance": 0,
+      "passed": true
+    },
+    {
+      "metric": "false_alarm_count",
+      "observed": 12,
+      "expected": 12,
+      "tolerance": 0,
+      "passed": true
+    },
+    {
+      "metric": "missed_failure_count",
+      "observed": 18,
+      "expected": 18,
+      "tolerance": 0,
+      "passed": true
+    },
+    {
+      "metric": "true_positive_count",
+      "observed": 50,
+      "expected": 50,
+      "tolerance": 0,
+      "passed": true
+    },
+    {
+      "metric": "true_negative_count",
+      "observed": 1920,
+      "expected": 1920,
+      "tolerance": 0,
+      "passed": true
+    },
+    {
+      "metric": "selected_method",
+      "observed": "isotonic",
+      "expected": "isotonic",
+      "passed": true
+    },
+    {
+      "metric": "test_brier",
+      "observed": 0.012369,
+      "expected": 0.012369,
+      "tolerance": 5e-07,
+      "passed": true
+    }
+  ]
+}
