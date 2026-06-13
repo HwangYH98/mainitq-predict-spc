@@ -1,0 +1,35 @@
+{
+  "dataset_path": "C:\\Users\\hoon9\\Documents\\capstone design\\data\\ai4i2020.csv",
+  "target_column": "Machine failure",
+  "test_size": 0.2,
+  "random_state": 42,
+  "train_rows": 8000,
+  "test_rows": 2000,
+  "feature_count": 8,
+  "dropped_columns": [
+    "UDI",
+    "Product ID",
+    "TWF",
+    "HDF",
+    "PWF",
+    "OSF",
+    "RNF"
+  ],
+  "models": {
+    "logistic_regression": {
+      "precision": 0.1418,
+      "recall": 0.8235,
+      "f1_score": 0.2419,
+      "roc_auc": 0.9069,
+      "pr_auc": 0.3817
+    },
+    "xgboost": {
+      "precision": 0.4444,
+      "recall": 0.8824,
+      "f1_score": 0.5911,
+      "roc_auc": 0.9736,
+      "pr_auc": 0.8014
+    }
+  },
+  "best_model_by_pr_auc": "xgboost"
+}

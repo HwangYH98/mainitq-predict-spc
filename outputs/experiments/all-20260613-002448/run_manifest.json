@@ -1,0 +1,23 @@
+{
+  "run_id": "all-20260613-002448",
+  "created_at_utc": "2026-06-12T15:24:50Z",
+  "project_root": "C:\\Users\\hoon9\\Documents\\capstone design",
+  "status": "robust_validation_completed",
+  "git": {
+    "commit": "5eb5af9ac938917bed9f5f7ebc947840d4d1cfec",
+    "branch": "main",
+    "dirty": false,
+    "status_porcelain": []
+  },
+  "policy": {
+    "accepted_top_level_outputs": "read-only for reproduction scripts",
+    "new_artifact_root": "outputs\\experiments\\all-20260613-002448",
+    "secret_policy": "Do not write API keys or credentials to artifacts."
+  },
+  "updated_at_utc": "2026-06-12T15:26:24Z",
+  "status_details": {
+    "baseline": "passed",
+    "outer_fold_count": 25,
+    "bootstrap_iterations": 2000
+  }
+}

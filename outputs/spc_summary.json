@@ -1,0 +1,27 @@
+{
+  "source": "AI4I 2020 fixed-test predictions with UDI-order simulated time axis",
+  "note": "Control limits are estimated from normal training rows and fixed on the test view. This is an offline UDI-order risk-flow visualization, not a live factory sensor stream.",
+  "selected_threshold": 0.86,
+  "rolling_window": 50,
+  "total_rows": 2000,
+  "high_risk_count": 62,
+  "spc_risk_alert_count": 133,
+  "actual_failure_count": 68,
+  "risk_mean": 0.079767,
+  "risk_ucl": 0.440784,
+  "risk_lcl": 0.0,
+  "max_probability": 0.996575,
+  "max_probability_udi": 3936,
+  "torque_center_line": 39.576971,
+  "torque_ucl": 68.077343,
+  "torque_lcl": 11.076599,
+  "torque_beyond_control_limit_count": 11,
+  "future_deviation": {
+    "horizon_steps": 10,
+    "predicted_future_deviation_rows": 1866,
+    "max_predicted_future_risk": 1.0,
+    "max_predicted_future_risk_time_step": 912,
+    "classification_f1_score": 0.5245,
+    "regression_rmse": 0.3696
+  }
+}
