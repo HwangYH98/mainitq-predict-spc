@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pandas as pd
+from pathlib import Path
+
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QVBoxLayout, QWidget
 
 from desktop_app.formatters import set_display_table
@@ -21,7 +23,7 @@ PROBABILITY_COLUMNS = [
 ]
 
 
-def latest_prediction_source() -> tuple[str, object] | None:
+def latest_prediction_source() -> tuple[str, Path] | None:
     existing = [(label, path) for label, path in PREDICTION_SOURCES if path.exists()]
     if not existing:
         return None
@@ -62,9 +64,9 @@ class RiskMonitoringPage(QWidget):
         layout.setSpacing(16)
 
         header = QHBoxLayout()
-        title = QLabel("위험 분석")
+        title = QLabel("위험 모니터링")
         title.setObjectName("sectionTitle")
-        refresh = QPushButton("새로고침")
+        refresh = QPushButton("최신 예측 결과 불러오기")
         refresh.setObjectName("secondaryButton")
         refresh.clicked.connect(self.render)
         header.addWidget(title)
@@ -72,7 +74,7 @@ class RiskMonitoringPage(QWidget):
         header.addWidget(refresh)
         layout.addLayout(header)
 
-        intro = QLabel("최근 예측 결과를 기준으로 고위험 건수, 관리한계, 위험 추세를 확인합니다.")
+        intro = QLabel("가장 최근 예측 결과를 기준으로 고위험 행, 위험 확률 추세, 추천 조치를 한 화면에서 확인합니다.")
         intro.setObjectName("muted")
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -90,7 +92,7 @@ class RiskMonitoringPage(QWidget):
         self.chart = ChartBox()
         layout.addWidget(self.chart)
 
-        self.table_label = QLabel("최근 위험 추세")
+        self.table_label = QLabel("고위험 Top rows")
         self.table_label.setObjectName("cardTitle")
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
@@ -107,8 +109,10 @@ class RiskMonitoringPage(QWidget):
 
         source = latest_prediction_source()
         source_label = "SPC 기준 데이터"
+        source_path: Path | None = None
         if source:
             source_label, prediction_path = source
+            source_path = prediction_path
             df = normalize_monitoring_frame(pd.read_csv(prediction_path), source_label)
         else:
             spc_path = OUTPUT_DIR / "spc_timeseries.csv"
@@ -120,32 +124,43 @@ class RiskMonitoringPage(QWidget):
         high_risk = summary.get("high_risk_count", summary.get("risk_summary", {}).get("high_risk_count", "N/A"))
         ucl = summary.get("risk_ucl", "N/A")
         lcl = summary.get("risk_lcl", "N/A")
+        max_probability: float | str = "N/A"
+        threshold: float | str = "N/A"
         if not df.empty and "risk_status" in df.columns:
             high_risk = int((df["risk_status"].astype(str) == "High Risk").sum())
         if not df.empty and "probability" in df.columns:
             values = pd.to_numeric(df["probability"], errors="coerce").dropna()
             if not values.empty:
+                max_probability = round(float(values.max()), 4)
                 ucl = round(min(1.0, float(values.mean() + 3 * values.std(ddof=0))), 4)
                 lcl = round(max(0.0, float(values.mean() - 3 * values.std(ddof=0))), 4)
+        if not df.empty and "selected_threshold" in df.columns:
+            threshold_values = pd.to_numeric(df["selected_threshold"], errors="coerce").dropna()
+            if not threshold_values.empty:
+                threshold = round(float(threshold_values.iloc[0]), 4)
 
         if df.empty:
             self.status_label.setText("아직 표시할 위험 추세 데이터가 없습니다. 데이터 예측을 먼저 실행하면 이 화면에 추세가 표시됩니다.")
         else:
-            self.status_label.setText(f"{source_label}의 최근 {min(len(df), 200)}개 관측치를 기준으로 위험 추세를 표시합니다.")
+            path_note = f" · 파일: {source_path.name}" if source_path else ""
+            self.status_label.setText(
+                f"현재 표시 중: {source_label}{path_note} · 최근 {min(len(df), 200)}개 관측치 기준 · 다음 행동: 고위험 Top rows부터 확인"
+            )
 
         cards = [
             ("관측 행 수", str(len(df)), "기준 데이터", "primary"),
             ("고위험 건수", str(high_risk), "위험 판정 기준 초과", "warning" if high_risk not in ["N/A", 0, "0"] else "success"),
-            ("관리상한", str(ucl), "고장 확률 UCL", "subtle"),
-            ("입력 출처", source_label, "최신 예측 결과 우선", "subtle"),
+            ("최고 위험 확률", str(max_probability), "최신 예측 결과", "danger" if isinstance(max_probability, float) and max_probability >= 0.86 else "primary"),
+            ("판정 기준", str(threshold), "결과 파일 기준", "subtle"),
         ]
         for index, (title, value, note, tone) in enumerate(cards):
             self.summary_grid.addWidget(make_card(title, value, note, tone=tone), index // 4, index % 4)
 
         self.chart.plot_spc(df.tail(200))
+        top_view = df.sort_values("probability", ascending=False) if "probability" in df.columns else df
         set_display_table(
             self.table,
-            df.tail(50),
-            ["source", "input_row", "vehicle_id", "time_step", "probability", "selected_threshold", "risk_status", "risk_priority_score"],
+            top_view.head(50),
+            ["source", "input_row", "vehicle_id", "time_step", "probability", "selected_threshold", "risk_status", "risk_priority_score", "recommendation"],
             max_rows=50,
         )

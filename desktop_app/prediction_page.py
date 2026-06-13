@@ -62,6 +62,7 @@ def detect_public_benchmark_csv(df: pd.DataFrame) -> str:
 
 class DataPredictionPage(QWidget):
     prediction_completed = Signal()
+    monitoring_requested = Signal()
 
     def __init__(self, actor: dict) -> None:
         super().__init__()
@@ -107,8 +108,8 @@ class DataPredictionPage(QWidget):
         controls = QGridLayout()
         controls.setHorizontalSpacing(10)
         controls.setVerticalSpacing(10)
-        self.sample_button = QPushButton("샘플 CSV 저장")
-        self.use_sample_button = QPushButton("샘플 바로 사용")
+        self.sample_button = QPushButton("샘플 저장")
+        self.use_sample_button = QPushButton("샘플 사용")
         self.load_button = QPushButton("CSV 불러오기")
         self.model_combo = QComboBox()
         self.model_combo.setMinimumWidth(210)
@@ -125,6 +126,7 @@ class DataPredictionPage(QWidget):
         self.quick_export_button = QPushButton("기본 위치 저장")
         self.export_button = QPushButton("결과 CSV 저장")
         self.open_folder_button = QPushButton("저장 폴더 열기")
+        self.open_monitoring_button = QPushButton("위험 모니터링으로 이동")
         self.sample_button.setObjectName("secondaryButton")
         self.use_sample_button.setObjectName("successButton")
         self.load_button.setObjectName("successButton")
@@ -132,10 +134,12 @@ class DataPredictionPage(QWidget):
         self.quick_export_button.setObjectName("secondaryButton")
         self.export_button.setObjectName("secondaryButton")
         self.open_folder_button.setObjectName("secondaryButton")
+        self.open_monitoring_button.setObjectName("successButton")
         self.predict_button.setEnabled(False)
         self.quick_export_button.setEnabled(False)
         self.export_button.setEnabled(False)
         self.open_folder_button.setEnabled(False)
+        self.open_monitoring_button.setEnabled(False)
         self.sample_button.clicked.connect(self.save_sample_csv)
         self.use_sample_button.clicked.connect(self.use_sample_csv)
         self.load_button.clicked.connect(self.load_csv)
@@ -143,6 +147,7 @@ class DataPredictionPage(QWidget):
         self.quick_export_button.clicked.connect(self.export_results_to_default)
         self.export_button.clicked.connect(self.export_results)
         self.open_folder_button.clicked.connect(self.open_saved_folder)
+        self.open_monitoring_button.clicked.connect(self.monitoring_requested.emit)
         controls.addWidget(self.sample_button, 0, 0)
         controls.addWidget(self.use_sample_button, 0, 1)
         controls.addWidget(self.load_button, 0, 2)
@@ -154,20 +159,19 @@ class DataPredictionPage(QWidget):
         controls.addWidget(self.quick_export_button, 1, 1)
         controls.addWidget(self.export_button, 1, 2)
         controls.addWidget(self.open_folder_button, 1, 3)
+        controls.addWidget(self.open_monitoring_button, 1, 4)
         controls.setColumnStretch(7, 1)
         layout.addLayout(controls)
 
         self.message_label = QLabel(
-            "처음이면 '샘플 바로 사용'을 눌러 예측 흐름을 확인하세요. "
-            "회사 센서 CSV 또는 SCANIA readout CSV를 불러온 뒤 예측 결과를 기본 위치에 저장할 수 있습니다."
+            "처음이면 '샘플 사용'으로 흐름을 확인하세요. CSV를 불러오면 컬럼 확인 뒤 예측 실행이 활성화됩니다."
         )
         self.message_label.setWordWrap(True)
         self.message_label.setObjectName("statusNotice")
         layout.addWidget(self.message_label)
 
         self.workflow_status_label = QLabel(
-            "지원 입력: 기본 센서 CSV, SCANIA readout CSV. "
-            "SCANIA spec/label/tte, MetroPT3, FEMTO benchmark 원본은 Admin 검증용입니다."
+            "현재 상태: CSV 대기 · 비활성 버튼은 입력 또는 예측 결과가 생기면 자동으로 켜집니다."
         )
         self.workflow_status_label.setObjectName("muted")
         self.workflow_status_label.setWordWrap(True)
@@ -273,9 +277,10 @@ class DataPredictionPage(QWidget):
             self.configure_schema_ui()
             self.empty_state.setVisible(False)
             self.predict_button.setEnabled(True)
+            self.open_monitoring_button.setEnabled(False)
             self.message_label.setText("샘플 CSV를 불러왔습니다. 컬럼 확인 후 예측 실행을 누르세요.")
             self.workflow_status_label.setText(
-                f"샘플 데이터 준비 완료: {len(self.input_df)}개 행, {len(self.input_df.columns)}개 컬럼"
+                f"현재 상태: 샘플 데이터 준비 완료 · {len(self.input_df)}개 행, {len(self.input_df.columns)}개 컬럼 · 다음 행동: 예측 실행"
             )
             record_audit(
                 self.actor,
@@ -302,13 +307,14 @@ class DataPredictionPage(QWidget):
                 self.current_csv_path = None
                 self.detected_schema = MODEL_AI4I
                 self.predict_button.setEnabled(False)
+                self.open_monitoring_button.setEnabled(False)
                 self.mapping_label.setVisible(False)
                 self.mapping_table.setVisible(False)
                 self.empty_state.setVisible(True)
                 message = (
-                    f"{public_benchmark} 원본 CSV는 제품 예측 업로드 형식이 아닙니다. "
-                    "공개 벤치마크 검증은 Admin 콘솔의 공개 산업 데이터 검증 화면이나 "
-                    "src\\public_industrial_benchmark.py를 사용하세요."
+                    f"문제: {public_benchmark} 원본 CSV는 제품 예측 업로드 형식이 아닙니다.\n"
+                    "원인 후보: spec/label/tte 또는 공개 벤치마크 원본 파일을 운영 예측 화면에 넣었습니다.\n"
+                    "해결 방법: 기본 센서 CSV 또는 SCANIA readout CSV를 사용하고, 공개 데이터 검증은 Admin 콘솔에서 실행하세요."
                 )
                 self.message_label.setText(message)
                 self.workflow_status_label.setText("제품 예측에는 기본 센서 CSV 또는 SCANIA readout CSV를 사용하세요.")
@@ -323,15 +329,21 @@ class DataPredictionPage(QWidget):
             self.configure_schema_ui()
             self.empty_state.setVisible(False)
             self.predict_button.setEnabled(True)
+            self.open_monitoring_button.setEnabled(False)
             self.message_label.setText(
                 f"CSV를 불러왔습니다: {Path(path).name}. 감지된 형식: {self.schema_label(self.detected_schema)}. 예측을 실행하세요."
             )
             self.workflow_status_label.setText(
-                f"컬럼 확인 단계: {len(self.input_df)}개 행, {len(self.input_df.columns)}개 컬럼을 불러왔습니다."
+                f"현재 상태: 컬럼 확인 완료 · {len(self.input_df)}개 행, {len(self.input_df.columns)}개 컬럼 · 다음 행동: 예측 실행"
             )
             record_audit(self.actor, "desktop_csv_loaded", "success", "csv", Path(path).name, {"rows": len(self.input_df), "schema": self.detected_schema})
         except Exception as error:
             record_audit(self.actor, "desktop_csv_loaded", "error", "csv", Path(path).name, error_message=str(error))
+            self.message_label.setText(
+                "문제: CSV 파일을 읽지 못했습니다.\n"
+                "원인 후보: 파일 인코딩, 비어 있는 CSV, 깨진 구분자, 숫자 컬럼의 잘못된 값.\n"
+                "해결 방법: 샘플 CSV 형식과 컬럼명을 맞춘 뒤 다시 불러오세요."
+            )
             show_error(self, "CSV 불러오기 실패", error)
 
     def schema_label(self, schema: str) -> str:
@@ -401,13 +413,13 @@ class DataPredictionPage(QWidget):
 
     def run_prediction(self) -> None:
         if self.input_df is None:
-            QMessageBox.warning(self, "CSV 필요", "먼저 CSV를 불러오세요.")
+            QMessageBox.warning(self, "CSV 필요", "먼저 샘플을 사용하거나 CSV를 불러오세요.")
             return
         cursor_active = False
         selected = self.selected_model()
         try:
             self.empty_state.setVisible(False)
-            self.message_label.setText("예측 실행 중입니다. 데이터 품질 진단과 위험도 계산을 처리하고 있습니다...")
+            self.message_label.setText("예측 실행 중입니다. 데이터 품질 진단, 위험 확률 계산, 우선순위 정렬을 처리하고 있습니다...")
             QApplication.processEvents()
             QApplication.setOverrideCursor(Qt.WaitCursor)
             cursor_active = True
@@ -439,6 +451,11 @@ class DataPredictionPage(QWidget):
             self.prediction_completed.emit()
         except Exception as error:
             record_audit(self.actor, "desktop_prediction_completed", "error", "prediction", selected, error_message=str(error))
+            self.message_label.setText(
+                "문제: 예측을 완료하지 못했습니다.\n"
+                "원인 후보: 필수 센서 컬럼 누락, 잘못된 단위 선택, 숫자 형식 오류, 지원하지 않는 CSV 구조.\n"
+                "해결 방법: 컬럼 확인 표에서 매핑을 고치거나 샘플 CSV 형식으로 다시 시도하세요."
+            )
             show_error(self, "예측 실패", error)
         finally:
             if cursor_active:
@@ -465,13 +482,16 @@ class DataPredictionPage(QWidget):
         max_probability = float(pd.to_numeric(result_df[probability_column]).max()) if len(result_df) else 0.0
         schema = str(self.prediction_result.get("schema", self.selected_model()))
         output_path = self.prediction_result.get("output_path") or OUTPUT_DIR / "company_prediction_results.csv"
+        quality_status = str(quality.get("quality_status", "OK"))
+        quality_note = f"품질 점수 {quality.get('quality_score', '-')}"
         cards = [
-            ("입력 행", str(len(result_df)), "예측 처리 완료", "primary"),
-            ("고위험 건수", str(high_risk), "선택 모델 기준", "warning" if high_risk else "success"),
-            ("최고 위험 점수", f"{max_probability:.3f}", "모델 출력 기준", "danger" if max_probability >= threshold else "primary"),
+            ("고위험 건수", str(high_risk), f"총 {len(result_df)}개 행 중", "warning" if high_risk else "success"),
+            ("최고 위험 확률", f"{max_probability:.3f}", "모델 출력 기준", "danger" if max_probability >= threshold else "primary"),
+            ("판정 기준", f"{threshold:.2f}", "운영 임계값", "primary"),
+            ("입력 품질", quality_status, quality_note, "success" if quality_status == "OK" else "warning"),
         ]
         for index, (title, value, note, tone) in enumerate(cards):
-            self.summary_grid.addWidget(make_card(title, value, note, tone=tone), index // 3, index % 3)
+            self.summary_grid.addWidget(make_card(title, value, note, tone=tone), index // 4, index % 4)
         risk_row_start = 1
         for index, (_, row) in enumerate(priority_df.head(3).iterrows()):
             probability = pd.to_numeric(pd.Series([row.get(probability_column, 0)]), errors="coerce").fillna(0).iloc[0]
@@ -550,9 +570,10 @@ class DataPredictionPage(QWidget):
         self.export_button.setEnabled(True)
         self.quick_export_button.setEnabled(True)
         self.open_folder_button.setEnabled(True)
-        self.message_label.setText("예측이 완료되었습니다. 요약 카드, 상위 위험 row, 위험도 그래프, 결과표 순서로 확인하세요.")
+        self.open_monitoring_button.setEnabled(True)
+        self.message_label.setText("예측이 완료되었습니다. 바로 '위험 모니터링으로 이동'해 최신 위험 추세를 확인하세요.")
         self.workflow_status_label.setText(
-            f"완료: 고위험 {high_risk}건, 최고 위험 점수 {max_probability:.3f}, 선택 모델 {self.schema_label(schema)}"
+            f"현재 상태: 예측 완료 · 고위험 {high_risk}건 · 최고 위험 확률 {max_probability:.3f} · 선택 모델 {self.schema_label(schema)}"
         )
 
     def export_results(self) -> None:

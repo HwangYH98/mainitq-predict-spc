@@ -214,6 +214,9 @@ def stylesheet() -> str:
     QPushButton#successButton:hover { background: #047857; }
     QPushButton#dangerButton { background: #dc2626; color: #ffffff; }
     QPushButton#dangerButton:hover { background: #b91c1c; }
+    QPushButton#secondaryButton:disabled, QPushButton#successButton:disabled, QPushButton#dangerButton:disabled {
+        background: #aab6c7; color: #f8fafc; border: 0;
+    }
     QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit, QTableWidget, QListWidget {
         background: white; border: 1px solid #cfd8e3; border-radius: 10px; padding: 7px;
     }
