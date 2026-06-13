@@ -57,10 +57,38 @@ def test_official_entrypoints_and_dev_script_layout() -> None:
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "release\\MaintiQ_Predict_Setup.exe" in readme
-    assert "local operator/Admin validation console" in readme
+    assert "operator/Admin validation console" in readme
     assert ".\\04_Run_Streamlit_Dashboard.bat" in readme
     assert ".\\02_Run_Admin_Console.bat" in readme
     assert "Accepted research run" in readme
+
+
+def test_streamlit_cloud_deployment_entrypoints_are_separated() -> None:
+    operator_entrypoint = ROOT / "app" / "operator_dashboard.py"
+    admin_entrypoint = ROOT / "app" / "admin_dashboard.py"
+    app_requirements = ROOT / "app" / "requirements.txt"
+
+    assert operator_entrypoint.exists()
+    assert admin_entrypoint.exists()
+    assert app_requirements.exists()
+
+    operator_source = operator_entrypoint.read_text(encoding="utf-8")
+    admin_source = admin_entrypoint.read_text(encoding="utf-8")
+    requirements = app_requirements.read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert 'dashboard.main(app_mode="user")' in operator_source
+    assert 'dashboard.main(app_mode="admin")' in admin_source
+    assert "app/operator_dashboard.py" in readme
+    assert "app/admin_dashboard.py" in readme
+    assert "[auth]" in readme
+    assert "Python `3.12`" in readme
+
+    for required in ["streamlit", "pandas", "numpy", "scikit-learn", "xgboost", "matplotlib", "joblib"]:
+        assert required in requirements
+
+    for desktop_only in ["PySide6", "pytest", "python-docx", "python-pptx", "pyinstaller"]:
+        assert desktop_only not in requirements
 
 
 def test_crash_log_export_creates_zip(tmp_path: Path, monkeypatch) -> None:

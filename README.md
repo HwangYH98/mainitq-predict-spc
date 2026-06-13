@@ -2,9 +2,7 @@
 
 MaintiQ Predict is a Windows desktop predictive-maintenance MVP. It loads sensor CSV rows, preprocesses them into the AI4I-compatible schema, estimates machine-failure risk, shows monitoring evidence, generates optional GenAI manager notes, and records human-approved work-order decisions.
 
-The official user entrypoint is the Windows desktop app and installer. Streamlit is kept as a local operator/Admin validation console, not as a static `.html` page.
-
-Streamlit은 GitHub에 소스가 올라가는 로컬 운영/Admin 검증 화면입니다. 최종 사용자가 설치해서 쓰는 배포물은 Windows installer입니다.
+The official user entrypoint is the Windows desktop app and installer. Streamlit is kept as an operator/Admin validation console. For browser-only evaluation, deploy the Streamlit entrypoints from GitHub with Streamlit Community Cloud.
 
 ## Final Evaluation Baseline
 
@@ -85,6 +83,35 @@ The Admin console is separated from the operator dashboard. It shows research va
 - Accepted research run: fixed by `app/accepted_research_run.json`
 
 Passwords and API keys are session-only. Do not store them in `.env`, README, outputs, screenshots, or Git history.
+
+## Browser Deployment With Streamlit Cloud
+
+Use this when reviewers need a URL that opens in a browser without installing Python or the desktop app.
+
+Recommended Streamlit Cloud apps:
+
+| Purpose | Entrypoint | Audience |
+|---|---|---|
+| Operator dashboard | `app/operator_dashboard.py` | Users who upload CSV files and review risk monitoring |
+| Admin validation console | `app/admin_dashboard.py` | Reviewers checking accepted experiments, reproducibility, and audit evidence |
+
+Deployment steps:
+
+1. Push the repository to GitHub.
+2. Open Streamlit Community Cloud and create a new app.
+3. Select this repository, the `main` branch, and one entrypoint above.
+4. In Advanced settings, select Python `3.12`.
+5. Add secrets in the Streamlit Cloud settings, not in Git:
+
+```toml
+[auth]
+operator_password = "set-a-reviewer-password"
+admin_password = "set-an-admin-password"
+```
+
+The Cloud deployment uses `app/requirements.txt`, which excludes desktop-only packages such as `PySide6` and build/test tools. The root `requirements-lock.txt` remains the local reproducibility environment for code review and thesis validation.
+
+Do not upload private factory data, `.env` files, API keys, or real company raw data to Streamlit Cloud. Uploaded CSV files and optional GenAI keys should be treated as session-only demo inputs.
 
 ## Reproduce Core Outputs
 
