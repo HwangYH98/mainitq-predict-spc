@@ -15,7 +15,7 @@ EQUIPMENT_ID_COLUMNS = (
     "UDI",
     "Product ID",
 )
-TIMESTAMP_COLUMNS = ("event_timestamp", "timestamp", "simulated_timestamp", "time_step")
+TIMESTAMP_COLUMNS = ("event_timestamp", "timestamp", "simulated_timestamp", "datetime", "date_time", "created_at")
 SENSOR_DEFAULTS = {
     "Type": "M",
     "Air temperature [K]": 298.1,
@@ -59,6 +59,25 @@ def _fallback_equipment_id(row: Mapping[str, Any]) -> str:
     return "selected-row"
 
 
+def _valid_event_timestamp(value: Any) -> str | None:
+    if not _has_value(value):
+        return None
+    timestamp_text = str(value).strip()
+    try:
+        datetime.fromisoformat(timestamp_text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return timestamp_text
+
+
+def _event_timestamp(row: Mapping[str, Any]) -> str:
+    for column in TIMESTAMP_COLUMNS:
+        timestamp = _valid_event_timestamp(_lookup(row, (column,)))
+        if timestamp:
+            return timestamp
+    return datetime.now().astimezone().replace(microsecond=0).isoformat()
+
+
 def _numeric(row: Mapping[str, Any], column: str, default: float) -> float:
     value = _lookup(row, (column,))
     if value is None:
@@ -73,14 +92,13 @@ def prediction_row_to_work_order_prefill(row: Mapping[str, Any] | Any) -> dict[s
     """Map one prediction/monitoring row into the work-order event form."""
     values = _row_dict(row)
     equipment_id = _lookup(values, EQUIPMENT_ID_COLUMNS)
-    timestamp = _lookup(values, TIMESTAMP_COLUMNS)
     type_value = str(_lookup(values, ("Type",)) or SENSOR_DEFAULTS["Type"]).strip().upper()
     if type_value not in {"L", "M", "H"}:
         type_value = str(SENSOR_DEFAULTS["Type"])
 
     return {
         "equipment_id": str(equipment_id or _fallback_equipment_id(values)),
-        "event_timestamp": str(timestamp or datetime.now().astimezone().replace(microsecond=0).isoformat()),
+        "event_timestamp": _event_timestamp(values),
         "source_system": "prediction_monitoring_selection",
         "sensor_row": {
             "Type": type_value,
